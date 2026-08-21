@@ -120,7 +120,7 @@ def init_db():
     )
     """)
 
-  # Migration dynamique pour ajouter les colonnes manquantes sans altérer les données
+  # Migration dynamique pour ajouter TOUTES les colonnes pouvant manquer
   def safe_add_column(table, column_def):
     col_name = column_def.split()[0]
     cursor.execute(f"PRAGMA table_info({table})")
@@ -132,6 +132,7 @@ def init_db():
   safe_add_column("clients", "machine_installee INTEGER DEFAULT 0")
   safe_add_column("clients", "frequence_jours INTEGER DEFAULT 30")
   safe_add_column("clients", "date_creation TEXT")
+  safe_add_column("commandes", "client_id INTEGER")
   safe_add_column("commandes", "code_courrier TEXT")
   safe_add_column("commandes", "statut TEXT DEFAULT 'En préparation'")
   safe_add_column("stock", "prix_achat REAL DEFAULT 0")
@@ -374,76 +375,84 @@ with tab_pos:
 
         col_act1, col_act2 = st.columns(2)
         with col_act1:
-          if st.button(
-              "✅ Valider & Enregistrer",
-              type="primary",
-              use_container_width=True,
-          ):
-            try:
-              conn = get_connection()
-              cursor = conn.cursor()
-              date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
+         if st.button(
+    "✅ Valider & Enregistrer", type="primary", use_container_width=True
+):
+  try:
+    conn = get_connection()
+    cursor = conn.cursor()
+    date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-              cursor.execute(
-                  """
-                                INSERT INTO commandes (client_id, client_nom, date_commande, code_courrier, prix_total, statut)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                """,
-                  (
-                      int(client_row["id"]),
-                      str(selected_client_name),
-                      date_now,
-                      str(code_suivi).strip(),
-                      float(total_ht),
-                      "En préparation",
-                  ),
-              )
-              cmd_id = cursor.lastrowid
+    # Vérification des colonnes réelles de la table 'commandes'
+    cursor.execute("PRAGMA table_info(commandes)")
+    cmd_cols = [r[1] for r in cursor.fetchall()]
 
-              for item in st.session_state.panier:
-                cursor.execute(
-                    """
-                                    INSERT INTO lignes_commande (commande_id, produit_id, nom_produit, quantite, prix_unitaire, total_ligne)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                    """,
-                    (
-                        int(cmd_id),
-                        int(item["produit_id"]),
-                        str(item["nom"]),
-                        float(item["quantite"]),
-                        float(item["prix_unitaire"]),
-                        float(item["total"]),
-                    ),
-                )
-                cursor.execute(
-                    """
-                                    UPDATE stock 
-                                    SET quantite = MAX(0, quantite - ?) 
-                                    WHERE id = ?
-                                    """,
-                    (float(item["quantite"]), int(item["produit_id"])),
-                )
+    if "client_id" in cmd_cols:
+      cursor.execute(
+          """
+                INSERT INTO commandes (client_id, client_nom, date_commande, code_courrier, prix_total, statut)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+          (
+              int(client_row["id"]),
+              str(selected_client_name),
+              date_now,
+              str(code_suivi).strip(),
+              float(total_ht),
+              "En préparation",
+          ),
+      )
+    else:
+      cursor.execute(
+          """
+                INSERT INTO commandes (client_nom, date_commande, code_courrier, prix_total, statut)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+          (
+              str(selected_client_name),
+              date_now,
+              str(code_suivi).strip(),
+              float(total_ht),
+              "En préparation",
+          ),
+      )
 
-              conn.commit()
-              conn.close()
+    cmd_id = cursor.lastrowid
 
-              st.session_state.panier = []
-              st.balloons()
-              st.success(
-                  f"🎉 Commande N°{cmd_id} enregistrée avec succès !"
-              )
-              st.rerun()
+    for item in st.session_state.panier:
+      cursor.execute(
+          """
+                INSERT INTO lignes_commande (commande_id, produit_id, nom_produit, quantite, prix_unitaire, total_ligne)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+          (
+              int(cmd_id),
+              int(item["produit_id"]),
+              str(item["nom"]),
+              float(item["quantite"]),
+              float(item["prix_unitaire"]),
+              float(item["total"]),
+          ),
+      )
+      cursor.execute(
+          """
+                UPDATE stock 
+                SET quantite = MAX(0, quantite - ?) 
+                WHERE id = ?
+                """,
+          (float(item["quantite"]), int(item["produit_id"])),
+      )
 
-            except Exception as e:
-              st.error(f"Erreur lors de l'enregistrement : {e}")
+    conn.commit()
+    conn.close()
 
-        with col_act2:
-          if st.button("🗑️ Vider le panier", use_container_width=True):
-            st.session_state.panier = []
-            st.rerun()
+    st.session_state.panier = []
+    st.balloons()
+    st.success(f"🎉 Commande N°{cmd_id} enregistrée avec succès !")
+    st.rerun()
 
-      else:
-        st.info("Votre panier est actuellement vide.")
+  except Exception as e:
+    st.error(f"Erreur lors de l'enregistrement : {e}")
 
 # ==========================================
 # ONGLET 2 : LOGISTIQUE & HISTORIQUE
