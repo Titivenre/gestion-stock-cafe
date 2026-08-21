@@ -1,24 +1,28 @@
+import os
 import sqlite3
 from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-# Configuration
+# Configuration de la page
 st.set_page_config(
     page_title="ERP Café & Clients", page_icon="☕", layout="wide"
 )
 
+DB_FILE = "database.db"
 
-# Connexion BDD
+
+# Connexion à la BDD
 def get_connection():
-  return sqlite3.connect("database.db")
+  return sqlite3.connect(DB_FILE)
 
 
-# Initialisation des tables BDD avec mise à jour automatique
+# Initialisation robuste : recreation propre pour eviter tout conflit de schéma
 def init_db():
   conn = get_connection()
   cursor = conn.cursor()
 
+  # 1. Table Stock
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS stock (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,6 +34,20 @@ def init_db():
         prix_unitaire REAL NOT NULL
     )
     """)
+
+  # 2. Table Clients (avec reconstruction si l'ancienne n'a pas la colonne type_cafe)
+  cursor.execute("PRAGMA table_info(clients)")
+  cols = [info[1] for info in cursor.fetchall()]
+
+  if "clients" in [
+      t[0]
+      for t in cursor.execute(
+          "SELECT name FROM sqlite_master WHERE type='table'"
+      ).fetchall()
+  ]:
+    if "type_cafe" not in cols:
+      # Si ancienne table sans la bonne colonne, on la recrée proprement
+      cursor.execute("DROP TABLE clients")
 
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS clients (
@@ -45,12 +63,7 @@ def init_db():
     )
     """)
 
-  # Vérification et ajout dynamique de la colonne type_cafe si manquante
-  cursor.execute("PRAGMA table_info(clients)")
-  columns = [column[1] for column in cursor.fetchall()]
-  if "type_cafe" not in columns:
-    cursor.execute("ALTER TABLE clients ADD COLUMN type_cafe TEXT")
-
+  # 3. Table Commandes
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS commandes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,6 +76,7 @@ def init_db():
     )
     """)
 
+  # 4. Table Lignes de Commande
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS lignes_commande (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,7 +127,11 @@ if not df_clients.empty and not df_commandes.empty:
         clients_a_relancer.append({
             "Entreprise": cli["nom_entreprise"],
             "Contact": cli["nom_contact"] or "N/A",
-            "Café habituel": cli.get("type_cafe", "Non précisé"),
+            "Café habituel": (
+                cli["type_cafe"]
+                if pd.notna(cli.get("type_cafe"))
+                else "Non précisé"
+            ),
             "Téléphone": cli["telephone"] or "N/A",
             "Dernière Commande": derniere_date_str,
             "Retard (Jours)": retard,
@@ -124,16 +142,16 @@ c1, c2, c3, c4 = st.columns(4)
 valeur_stock = (
     (df_stock["quantite"] * df_stock["prix_unitaire"]).sum()
     if not df_stock.empty
-    else 0
+    else 0.0
 )
 c1.metric("Valeur Stock", f"{valeur_stock:,.2f} €")
-c2.metric("Clients", len(df_clients))
+c2.metric("Clients Enregistrés", len(df_clients))
 c3.metric(
     "🚨 Relances à Faire",
     len(clients_a_relancer),
     delta_color="inverse",
 )
-c4.metric("Commandes Total", len(df_commandes))
+c4.metric("Commandes Totales", len(df_commandes))
 
 st.divider()
 
@@ -199,10 +217,10 @@ with tab_stock:
             (
                 nom_prod.strip(),
                 cat_final,
-                qte_prod,
+                float(qte_prod),
                 unite_prod,
-                seuil_prod,
-                prix_prod,
+                float(seuil_prod),
+                float(prix_prod),
             ),
         )
         conn.commit()
@@ -234,11 +252,11 @@ with tab_stock:
             (
                 row["nom"],
                 row["categorie"],
-                row["quantite"],
+                float(row["quantite"]),
                 row["unite"],
-                row["seuil_alerte"],
-                row["prix_unitaire"],
-                row["id"],
+                float(row["seuil_alerte"]),
+                float(row["prix_unitaire"]),
+                int(row["id"]),
             ),
         )
       conn.commit()
@@ -276,9 +294,16 @@ with tab_commande:
           df_clients["nom_entreprise"] == client_choisi_nom
       ].iloc[0]
 
+      cafe_affich = (
+          client_info["type_cafe"]
+          if pd.notna(client_info.get("type_cafe"))
+          and str(client_info["type_cafe"]).strip()
+          else "Non précisé"
+      )
+
       st.info(
-          f"☕ **Café habituel :** {client_info.get('type_cafe', 'Non précisé')}  \n"
-          f"⚙️ **Machine posée :** {'Oui' if client_info['machine_installee'] == 1 else 'Non'}"
+          f"☕ **Café habituel :** {cafe_affich}  \n⚙️ **Machine posée :**"
+          f" {'Oui' if client_info['machine_installee'] == 1 else 'Non'}"
       )
 
       st.write("### 2. Ajouter des produits")
@@ -303,7 +328,9 @@ with tab_commande:
           max_value=100.0,
           value=0.0,
       )
-      prix_final = prod_choisi["prix_unitaire"] * (1 - (remise_pct / 100.0))
+      prix_final = float(prod_choisi["prix_unitaire"]) * (
+          1.0 - (float(remise_pct) / 100.0)
+      )
 
       if remise_pct > 0:
         st.write(f"Prix remisé : **{prix_final:,.2f} €**")
@@ -349,7 +376,7 @@ with tab_commande:
                   str(client_choisi_nom),
                   date_str,
                   str(code_courrier_input),
-                  total_cmd,
+                  float(total_cmd),
                   "En préparation",
               ),
           )
