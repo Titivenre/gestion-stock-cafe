@@ -14,10 +14,13 @@ def get_connection():
   return sqlite3.connect("database.db")
 
 
-# Initialisation et migration de la base de données
+# Initialisation et migration automatique de la base de données
 def init_db():
   conn = get_connection()
   cursor = conn.cursor()
+
+  # Suppression propre si ancienne version incompatible
+  cursor.execute("DROP TABLE IF EXISTS clients")
 
   # Table Stock
   cursor.execute("""
@@ -67,9 +70,7 @@ def init_db():
         produit_id INTEGER NOT NULL,
         nom_produit TEXT NOT NULL,
         quantite REAL NOT NULL,
-        prix_unitaire REAL NOT NULL,
-        FOREIGN KEY (commande_id) REFERENCES commandes (id),
-        FOREIGN KEY (produit_id) REFERENCES stock (id)
+        prix_unitaire REAL NOT NULL
     )
     """)
 
@@ -120,9 +121,7 @@ if not df_clients.empty and not df_commandes.empty:
     if not cmds_cli.empty:
       derniere_date_str = cmds_cli.iloc[0]["date_commande"]
       try:
-        derniere_date = datetime.strptime(
-            derniere_date_str, "%Y-%m-%d %H:%M"
-        )
+        derniere_date = datetime.strptime(derniere_date_str, "%Y-%m-%d %H:%M")
       except ValueError:
         derniere_date = datetime.strptime(derniere_date_str, "%Y-%m-%d")
 
@@ -162,7 +161,7 @@ tab_stock, tab_commande, tab_relance, tab_clients, tab_historique = st.tabs([
     "📦 Gestion Stock",
     "🛒 Passer une Commande",
     "🔔 Rappels & Relances",
-    "👥 Repertoire Clients",
+    "👥 Répertoire Clients",
     "📜 Historique Commandes",
 ])
 
@@ -206,7 +205,10 @@ with tab_commande:
   st.subheader("Créer une Commande Multi-Produits")
 
   if df_clients.empty:
-    st.warning("⚠️ Veillez d'abord ajouter au moins un client dans l'onglet 'Répertoire Clients'.")
+    st.warning(
+        "⚠️ Veillez d'abord ajouter au moins un client dans l'onglet 'Répertoire"
+        " Clients'."
+    )
   else:
     if "panier" not in st.session_state:
       st.session_state.panier = []
@@ -225,7 +227,8 @@ with tab_commande:
       a_machine = client_info["machine_installee"] == 1
       if a_machine:
         st.success(
-            "💡 **Machine installée chez ce client : Remise de 15 % appliquée sur le café !**"
+            "💡 **Machine installée chez ce client : Remise de 15 % appliquée sur"
+            " le café !**"
         )
       else:
         st.info("Client standard (Tarif normal)")
@@ -250,7 +253,7 @@ with tab_commande:
 
         prix_appl = prod_choisi["prix_unitaire"]
         if a_machine and prod_choisi["categorie"] == "Café":
-          prix_appl = prix_appl * 0.85  # 15% de réduction
+          prix_appl = prix_appl * 0.85
 
         if st.button("➕ Ajouter au panier"):
           st.session_state.panier.append({
@@ -334,7 +337,8 @@ with tab_relance:
   st.subheader("🔔 Clients ayant dépassé leur fréquence de commande")
   if clients_a_relancer:
     st.error(
-        f"⚠️ **{len(clients_a_relancer)} client(s) devrai(ent) déjà avoir recommandé du café !**"
+        f"⚠️ **{len(clients_a_relancer)} client(s) devrai(ent) déjà avoir"
+        " recommandé du café !**"
     )
     st.dataframe(
         pd.DataFrame(clients_a_relancer),
@@ -403,15 +407,18 @@ with tab_historique:
     conn = get_connection()
     for _, cmd in df_commandes.iterrows():
       with st.expander(
-          f"Commande N°{cmd['id']} - {cmd['client_nom']} ({cmd['prix_total']:,.2f} €)"
+          f"Commande N°{cmd['id']} - {cmd['client_nom']}"
+          f" ({cmd['prix_total']:,.2f} €)"
       ):
         st.write(f"**Date :** {cmd['date_commande']}")
         st.write(
-            f"**Code Suivi/Courrier :** {cmd['code_courrier'] or 'Non renseigné'}"
+            f"**Code Suivi/Courrier :** {cmd['code_courrier'] or 'Non'}"
+            " renseigné"
         )
 
         df_l = pd.read_sql_query(
-            f"SELECT nom_produit, quantite, prix_unitaire FROM lignes_commande WHERE commande_id = {cmd['id']}",
+            "SELECT nom_produit, quantite, prix_unitaire FROM"
+            f" lignes_commande WHERE commande_id = {cmd['id']}",
             conn,
         )
         st.dataframe(df_l, use_container_width=True, hide_index=True)
