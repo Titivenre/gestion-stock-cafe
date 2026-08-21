@@ -156,7 +156,6 @@ df_stock, df_clients, df_commandes = load_data()
 clients_a_relancer = []
 if not df_clients.empty and not df_commandes.empty:
   now = datetime.now()
-  # Détection dynamique du nom de la colonne client dans df_commandes
   col_cli = (
       "client_nom"
       if "client_nom" in df_commandes.columns
@@ -394,7 +393,6 @@ with tab_pos:
               cursor = conn.cursor()
               date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-              # Inspection de la structure réelle de la table 'commandes'
               cursor.execute("PRAGMA table_info(commandes)")
               existing_cols = [r[1] for r in cursor.fetchall()]
 
@@ -412,6 +410,23 @@ with tab_pos:
               if "client" in existing_cols:
                 fields.append("client")
                 values.append(str(selected_client_name))
+
+              first_pid = (
+                  st.session_state.panier[0]["produit_id"]
+                  if st.session_state.panier
+                  else 1
+              )
+              if "produit_id" in existing_cols:
+                fields.append("produit_id")
+                values.append(first_pid)
+
+              if "produit" in existing_cols:
+                fields.append("produit")
+                values.append(st.session_state.panier[0]["nom"])
+
+              if "quantite" in existing_cols:
+                fields.append("quantite")
+                values.append(st.session_state.panier[0]["quantite"])
 
               fields.extend(["date_commande", "code_courrier", "prix_total", "statut"])
               values.extend([
