@@ -90,7 +90,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS commandes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_id INTEGER,
-        client_nom TEXT NOT NULL,
+        client_nom TEXT NOT NULL DEFAULT '',
         date_commande TEXT NOT NULL,
         code_courrier TEXT,
         prix_total REAL NOT NULL,
@@ -113,6 +113,7 @@ def init_db():
     )
     """)
 
+  # Vérification et migration dynamique des colonnes manquantes
   def safe_add_column(table, column_def):
     col_name = column_def.split()[0]
     cursor.execute(f"PRAGMA table_info({table})")
@@ -124,9 +125,12 @@ def init_db():
   safe_add_column("clients", "machine_installee INTEGER DEFAULT 0")
   safe_add_column("clients", "frequence_jours INTEGER DEFAULT 30")
   safe_add_column("clients", "date_creation TEXT")
+
   safe_add_column("commandes", "client_id INTEGER")
+  safe_add_column("commandes", "client_nom TEXT DEFAULT ''")
   safe_add_column("commandes", "code_courrier TEXT")
   safe_add_column("commandes", "statut TEXT DEFAULT 'En préparation'")
+
   safe_add_column("stock", "prix_achat REAL DEFAULT 0")
 
   conn.commit()
@@ -259,25 +263,33 @@ with tab_pos:
 
       cafe_habituel = (
           client_row["type_cafe"]
-          if pd.notna(client_row["type_cafe"]) and str(client_row["type_cafe"]).strip()
+          if pd.notna(client_row["type_cafe"])
+          and str(client_row["type_cafe"]).strip()
           else "Non renseigné"
       )
       machine = "Oui" if client_row["machine_installee"] == 1 else "Non"
 
       st.info(
           f"🏢 **Client :** {selected_client_name}  \n"
-          f"☕ **Café habituel :** {cafe_habituel} | ⚙️ **Machine en prêt :** {machine}  \n"
-          f"📞 **Contact :** {client_row['nom_contact'] or 'N/A'} ({client_row['telephone'] or 'N/A'})"
+          f"☕ **Café habituel :** {cafe_habituel} | ⚙️ **Machine en prêt :**"
+          f" {machine}  \n"
+          f"📞 **Contact :** {client_row['nom_contact'] or 'N/A'}"
+          f" ({client_row['telephone'] or 'N/A'})"
       )
 
       st.markdown("##### 2. Sélection des produits")
       p_options = {}
       for _, r in df_stock.iterrows():
-        label = f"[{r['categorie']}] {r['nom']} — Stock: {r['quantite']} {r['unite']} ({r['prix_unitaire']:.2f} €/u)"
+        label = (
+            f"[{r['categorie']}] {r['nom']} — Stock: {r['quantite']}"
+            f" {r['unite']} ({r['prix_unitaire']:.2f} €/u)"
+        )
         p_options[label] = r
 
       selected_prod_label = st.selectbox(
-          "Rechercher un produit *", list(p_options.keys()), key="pos_prod_select"
+          "Rechercher un produit *",
+          list(p_options.keys()),
+          key="pos_prod_select",
       )
       selected_prod = p_options[selected_prod_label]
 
@@ -375,38 +387,20 @@ with tab_pos:
               cursor = conn.cursor()
               date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-              cursor.execute("PRAGMA table_info(commandes)")
-              cmd_cols = [r[1] for r in cursor.fetchall()]
-
-              if "client_id" in cmd_cols:
-                cursor.execute(
-                    """
-                                    INSERT INTO commandes (client_id, client_nom, date_commande, code_courrier, prix_total, statut)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                    """,
-                    (
-                        int(client_row["id"]),
-                        str(selected_client_name),
-                        date_now,
-                        str(code_suivi).strip(),
-                        float(total_ht),
-                        "En préparation",
-                    ),
-                )
-              else:
-                cursor.execute(
-                    """
-                                    INSERT INTO commandes (client_nom, date_commande, code_courrier, prix_total, statut)
-                                    VALUES (?, ?, ?, ?, ?)
-                                    """,
-                    (
-                        str(selected_client_name),
-                        date_now,
-                        str(code_suivi).strip(),
-                        float(total_ht),
-                        "En préparation",
-                    ),
-                )
+              cursor.execute(
+                  """
+                                INSERT INTO commandes (client_id, client_nom, date_commande, code_courrier, prix_total, statut)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                """,
+                  (
+                      int(client_row["id"]),
+                      str(selected_client_name),
+                      date_now,
+                      str(code_suivi).strip(),
+                      float(total_ht),
+                      "En préparation",
+                  ),
+              )
 
               cmd_id = cursor.lastrowid
 
@@ -488,7 +482,10 @@ with tab_cmd_hist:
           else ("🔵" if cmd["statut"] == "Expédiée" else "🟢")
       )
 
-      header_text = f"{status_color} Commande N°{cmd['id']} — {cmd['client_nom']} — {cmd['prix_total']:,.2f} € HT ({cmd['date_commande']})"
+      header_text = (
+          f"{status_color} Commande N°{cmd['id']} — {cmd['client_nom']} —"
+          f" {cmd['prix_total']:,.2f} € HT ({cmd['date_commande']})"
+      )
 
       with st.expander(header_text):
         c_info1, c_info2 = st.columns(2)
