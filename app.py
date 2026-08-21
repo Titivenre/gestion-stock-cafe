@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-# Configuration de la page
 st.set_page_config(
     page_title="ERP Café & Clients", page_icon="☕", layout="wide"
 )
@@ -12,17 +11,15 @@ st.set_page_config(
 DB_FILE = "database.db"
 
 
-# Connexion à la BDD
 def get_connection():
   return sqlite3.connect(DB_FILE)
 
 
-# Initialisation robuste : recreation propre pour eviter tout conflit de schéma
 def init_db():
   conn = get_connection()
   cursor = conn.cursor()
 
-  # 1. Table Stock
+  # 1. Table stock
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS stock (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,20 +32,7 @@ def init_db():
     )
     """)
 
-  # 2. Table Clients (avec reconstruction si l'ancienne n'a pas la colonne type_cafe)
-  cursor.execute("PRAGMA table_info(clients)")
-  cols = [info[1] for info in cursor.fetchall()]
-
-  if "clients" in [
-      t[0]
-      for t in cursor.execute(
-          "SELECT name FROM sqlite_master WHERE type='table'"
-      ).fetchall()
-  ]:
-    if "type_cafe" not in cols:
-      # Si ancienne table sans la bonne colonne, on la recrée proprement
-      cursor.execute("DROP TABLE clients")
-
+  # 2. Table clients
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +47,7 @@ def init_db():
     )
     """)
 
-  # 3. Table Commandes
+  # 3. Table commandes
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS commandes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,7 +60,7 @@ def init_db():
     )
     """)
 
-  # 4. Table Lignes de Commande
+  # 4. Table lignes_commande
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS lignes_commande (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,13 +72,25 @@ def init_db():
     )
     """)
 
+  # --- MIGRATION AUTO DES ANCIENNES BASES ---
+  # Ajoute les colonnes si la base sur le serveur est une ancienne version
+  def add_column_if_missing(table, column_name, column_type):
+    cursor.execute(f"PRAGMA table_info({table})")
+    cols = [info[1] for info in cursor.fetchall()]
+    if column_name not in cols:
+      cursor.execute(
+          f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}"
+      )
+
+  add_column_if_missing("clients", "type_cafe", "TEXT")
+  add_column_if_missing("commandes", "code_courrier", "TEXT")
+
   conn.commit()
   conn.close()
 
 
 init_db()
 
-# Titre
 st.title("☕ ERP Café - Gestion globale & CRM")
 
 # Chargement données
@@ -129,7 +125,9 @@ if not df_clients.empty and not df_commandes.empty:
             "Contact": cli["nom_contact"] or "N/A",
             "Café habituel": (
                 cli["type_cafe"]
-                if pd.notna(cli.get("type_cafe"))
+                if "type_cafe" in cli
+                and pd.notna(cli["type_cafe"])
+                and str(cli["type_cafe"]).strip()
                 else "Non précisé"
             ),
             "Téléphone": cli["telephone"] or "N/A",
@@ -294,10 +292,10 @@ with tab_commande:
           df_clients["nom_entreprise"] == client_choisi_nom
       ].iloc[0]
 
+      type_c = client_info.get("type_cafe", None)
       cafe_affich = (
-          client_info["type_cafe"]
-          if pd.notna(client_info.get("type_cafe"))
-          and str(client_info["type_cafe"]).strip()
+          type_c
+          if pd.notna(type_c) and str(type_c).strip()
           else "Non précisé"
       )
 
@@ -479,8 +477,9 @@ with tab_clients:
   st.divider()
   st.subheader("📋 Répertoire des Clients")
   if not df_clients.empty:
-    st.dataframe(
-        df_clients[[
+    cols_to_show = [
+        col
+        for col in [
             "id",
             "nom_entreprise",
             "type_cafe",
@@ -490,7 +489,11 @@ with tab_clients:
             "telephone",
             "email",
             "adresse",
-        ]],
+        ]
+        if col in df_clients.columns
+    ]
+    st.dataframe(
+        df_clients[cols_to_show],
         use_container_width=True,
         hide_index=True,
     )
@@ -508,10 +511,12 @@ with tab_historique:
           f" ({cmd['prix_total']:,.2f} €)"
       ):
         st.write(f"**Date :** {cmd['date_commande']}")
-        st.write(
-            f"**Code Suivi/Courrier :** {cmd['code_courrier'] or 'Non'}"
-            " renseigné"
+        code_s = (
+            cmd["code_courrier"]
+            if "code_courrier" in cmd and pd.notna(cmd["code_courrier"])
+            else "Non renseigné"
         )
+        st.write(f"**Code Suivi/Courrier :** {code_s}")
 
         df_l = pd.read_sql_query(
             "SELECT nom_produit, quantite, prix_unitaire FROM"
