@@ -5,32 +5,35 @@ import pandas as pd
 import streamlit as st
 
 # ==========================================
-# 1. CONFIGURATION & STYLE ENTERPRISE
+# 1. CONFIGURATION & DESIGN SIMPLIFIÉ
 # ==========================================
 st.set_page_config(
-    page_title="ERP Café Pro — Enterprise Edition",
+    page_title="ERP Café Pro (咖啡管理系统)",
     page_icon="☕",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+# Style visuel simplifié pour faciliter la lecture
 st.markdown(
     """
     <style>
-    .main { background-color: #f8f9fa; }
+    .main { background-color: #f4f6f9; }
     .stMetric {
         background-color: #ffffff;
         padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        border: 1px solid #e9ecef;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border: 1px solid #e0e6ed;
     }
     .stButton>button {
-        border-radius: 6px;
-        font-weight: 600;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 16px;
+        padding: 10px 20px;
     }
-    .stSelectbox, .stTextInput, .stNumberInput {
-        margin-bottom: 5px;
+    .stAlert {
+        border-radius: 10px;
     }
     </style>
     """,
@@ -41,7 +44,7 @@ DB_FILE = "database.db"
 
 
 # ==========================================
-# 2. GESTION DE LA BASE DE DONNÉES SÉCURISÉE
+# 2. BASE DE DONNÉES & MIGRATIONS AUTOMATIQUES
 # ==========================================
 def get_connection():
   conn = sqlite3.connect(DB_FILE, timeout=20)
@@ -120,7 +123,6 @@ def init_db():
     if col_name not in existing_cols:
       cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
 
-  # Migration dynamique des tables
   safe_add_column("clients", "type_cafe TEXT")
   safe_add_column("clients", "machine_installee INTEGER DEFAULT 0")
   safe_add_column("clients", "frequence_jours INTEGER DEFAULT 30")
@@ -144,7 +146,7 @@ init_db()
 
 
 # ==========================================
-# 3. CHARGEMENT ET TRAITEMENT DES DONNÉES
+# 3. CHARGEMENT & CALCULS
 # ==========================================
 def load_data():
   conn = get_connection()
@@ -184,36 +186,34 @@ if not df_clients.empty and not df_commandes.empty:
         if now > next_date:
           retard = (now - next_date).days
           clients_a_relancer.append({
-              "ID": cli["id"],
-              "Entreprise": cli["nom_entreprise"],
-              "Contact": cli["nom_contact"] or "N/A",
-              "Café habituel": (
+              "Client (客户)": cli["nom_entreprise"],
+              "Contact (联系人)": cli["nom_contact"] or "N/A",
+              "Téléphone (电话)": cli["telephone"] or "N/A",
+              "Café habituel (常用咖啡)": (
                   cli["type_cafe"]
                   if pd.notna(cli["type_cafe"])
-                  else "Non renseigné"
+                  else "Non renseigné (未填写)"
               ),
-              "Téléphone": cli["telephone"] or "N/A",
-              "Dernière Commande": last_date_str,
-              "Retard (Jours)": retard,
+              "Dernière Commande (上次订单)": last_date_str,
+              "Retard (Jours) (延迟天数)": f"{retard} jours (天)",
           })
 
 
 # ==========================================
-# 4. EN-TÊTE & DASHBOARD EXECUTIVE
+# 4. TABLEAU DE BORD (DASHBOARD)
 # ==========================================
-st.title("☕ ERP Café Pro — Solution de Gestion")
-st.caption(
-    "Système intégré de gestion de stock, CRM client, commandes et logistique"
-)
+st.title("☕ ERP Café Pro (咖啡管理系统)")
+st.caption("Gestion simple et rapide (简单快速的管理工具)")
 
-col_kpi1, col_kpi2, col_kpi3, col_kpi4, col_kpi5 = st.columns(5)
+# Indicateurs clés en haut de page
+col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
 
-valeur_stock_ht = (
+valeur_stock = (
     (df_stock["quantite"] * df_stock["prix_unitaire"]).sum()
     if not df_stock.empty
     else 0.0
 )
-alertes_stock = (
+alertes = (
     len(df_stock[df_stock["quantite"] <= df_stock["seuil_alerte"]])
     if not df_stock.empty
     else 0
@@ -222,47 +222,53 @@ ca_total = (
     df_commandes["prix_total"].sum() if not df_commandes.empty else 0.0
 )
 
-col_kpi1.metric("📦 Valeur Stock (HT)", f"{valeur_stock_ht:,.2f} €")
-col_kpi2.metric("👥 Répertoire Clients", len(df_clients))
-col_kpi3.metric("🛒 CA Total Généré", f"{ca_total:,.2f} €")
-col_kpi4.metric("🚨 Alertes Stock Bas", alertes_stock)
-col_kpi5.metric(
-    "🔔 Relances à Faire", len(clients_a_relancer), delta_color="inverse"
+col_k1.metric("📦 Valeur Stock (库存总值)", f"{valeur_stock:,.2f} €")
+col_k2.metric("👥 Clients (客户数量)", len(df_clients))
+col_k3.metric("🛒 Ventes (总销售额)", f"{ca_total:,.2f} €")
+col_k4.metric("🚨 Alertes Stock (库存警告)", alertes)
+col_k5.metric(
+    "🔔 Relances (需要催单)", len(clients_a_relancer), delta_color="inverse"
 )
 
 st.divider()
 
-tab_pos, tab_cmd_hist, tab_stock, tab_crm, tab_relances = st.tabs([
-    "🛒 Prise de Commande (POS)",
-    "📜 Commandes & Logistique",
-    "📦 Gestion des Stocks",
-    "👥 CRM & Fiches Clients",
-    "🔔 Rappels & Relances",
+# Navigation par onglets bilingues
+tab_pos, tab_cmd, tab_stock, tab_crm, tab_relances = st.tabs([
+    "🛒 1. Vendre ( Take Order / 下订单 )",
+    "📜 2. Commandes ( Order History / 历史订单 )",
+    "📦 3. Stocks ( Inventory / 库存管理 )",
+    "👥 4. Clients ( Customers / 客户管理 )",
+    "🔔 5. Relances ( Reminders / 催单提醒 )",
 ])
 
+
 # ==========================================
-# ONGLET 1 : PRISE DE COMMANDE (POS)
+# ONGLET 1 : NOUVELLE COMMANDE (POS)
 # ==========================================
 with tab_pos:
-  st.subheader("Créer une nouvelle commande")
+  st.subheader("🛒 Prise de Commande ( Taking an Order / 下订单 )")
 
   if df_clients.empty:
-    st.info("💡 Ajoutez votre premier client dans l'onglet **'CRM'**.")
+    st.warning(
+        "⚠️ Aucun client enregistré. Allez dans l'onglet **'4. Clients"
+        " (客户)'** pour en ajouter un."
+    )
   elif df_stock.empty:
-    st.info(
-        "💡 Ajoutez vos premiers articles dans l'onglet **'Gestion des"
-        " Stocks'**."
+    st.warning(
+        "⚠️ Aucun produit en stock. Allez dans l'onglet **'3. Stocks"
+        " (库存)'** pour ajouter des produits."
     )
   else:
     if "panier" not in st.session_state:
       st.session_state.panier = []
 
-    c_left, c_right = st.columns([1, 1], gap="medium")
+    c_left, c_right = st.columns([1, 1], gap="large")
 
+    # SECTION GAUCHE : CHOIX DU CLIENT ET PRODUITS
     with c_left:
-      st.markdown("##### 1. Sélection du Client")
+      st.markdown("### Étape 1 : Choisir le Client (步骤 1：选择客户)")
       selected_client_name = st.selectbox(
-          "Choisir le client *",
+          "Sélectionner un client dans la liste (选择客户) :",
           options=df_clients["nom_entreprise"].tolist(),
           key="pos_client_select",
       )
@@ -270,34 +276,37 @@ with tab_pos:
       client_row = df_clients[
           df_clients["nom_entreprise"] == selected_client_name
       ].iloc[0]
-
       cafe_habituel = (
           client_row["type_cafe"]
           if pd.notna(client_row["type_cafe"])
           and str(client_row["type_cafe"]).strip()
-          else "Non renseigné"
+          else "Non renseigné (未填写)"
       )
-      machine = "Oui" if client_row["machine_installee"] == 1 else "Non"
+      machine = (
+          "Oui (有)" if client_row["machine_installee"] == 1 else "Non (无)"
+      )
 
       st.info(
-          f"🏢 **Client :** {selected_client_name}  \n"
-          f"☕ **Café habituel :** {cafe_habituel} | ⚙️ **Machine en prêt :**"
-          f" {machine}  \n"
-          f"📞 **Contact :** {client_row['nom_contact'] or 'N/A'}"
-          f" ({client_row['telephone'] or 'N/A'})"
+          f"👤 **Client (客户) :** {selected_client_name}  \n"
+          f"☕ **Café habituel (常用咖啡) :** {cafe_habituel}  \n"
+          f"⚙️ **Machine prêtée (借用咖啡机) :** {machine} | 📞 **Tél (电话) :**"
+          f" {client_row['telephone'] or 'N/A'}"
       )
 
-      st.markdown("##### 2. Sélection des produits")
+      st.markdown(
+          "--- \n### Étape 2 : Ajouter des Produits (步骤 2：添加商品)"
+      )
+
       p_options = {}
       for _, r in df_stock.iterrows():
         label = (
-            f"[{r['categorie']}] {r['nom']} — Stock: {r['quantite']}"
-            f" {r['unite']} ({r['prix_unitaire']:.2f} €/u)"
+            f"[{r['categorie']}] {r['nom']} — Restant (库存): {r['quantite']}"
+            f" {r['unite']} | {r['prix_unitaire']:.2f} €/u"
         )
         p_options[label] = r
 
       selected_prod_label = st.selectbox(
-          "Rechercher un produit *",
+          "Choisir un produit (选择商品) :",
           list(p_options.keys()),
           key="pos_prod_select",
       )
@@ -311,15 +320,16 @@ with tab_pos:
             else 0.1
         )
         qte_input = st.number_input(
-            f"Quantité ({selected_prod['unite']})",
+            f"Quantité (数量) en {selected_prod['unite']} :",
             min_value=0.1,
             max_value=max_qte,
             value=min(1.0, max_qte),
             step=1.0,
         )
+
       with col_q2:
         remise_input = st.number_input(
-            "Remise article (%)",
+            "Remise / Reduction (折扣) % :",
             min_value=0.0,
             max_value=100.0,
             value=0.0,
@@ -329,15 +339,11 @@ with tab_pos:
       prix_base = float(selected_prod["prix_unitaire"])
       prix_effectif = prix_base * (1.0 - (remise_input / 100.0))
 
-      if remise_input > 0:
-        st.caption(
-            f"Prix unitaire remisé : **{prix_effectif:.2f} € HT** (au lieu de"
-            f" {prix_base:.2f} €)"
-        )
-
-      if st.button("➕ Ajouter la ligne au panier", use_container_width=True):
+      if st.button(
+          "➕ Ajouter au panier (放入购物车)", use_container_width=True
+      ):
         if selected_prod["quantite"] < qte_input:
-          st.error("Stock insuffisant pour ce produit !")
+          st.error("❌ Stock insuffisant (库存不足) !")
         else:
           st.session_state.panier.append({
               "produit_id": int(selected_prod["id"]),
@@ -347,11 +353,15 @@ with tab_pos:
               "prix_unitaire": float(prix_effectif),
               "total": float(qte_input * prix_effectif),
           })
-          st.success(f"'{selected_prod['nom']}' ajouté au panier.")
+          st.success(
+              f"✅ '{selected_prod['nom']}' ajouté au panier (已加入购物车) !"
+          )
           st.rerun()
 
+    # SECTION DROITE : RECAPITULATIF ET VALIDATION
     with c_right:
-      st.markdown("##### 3. Récapitulatif de la Commande")
+      st.markdown("### Étape 3 : Valider le Panier (步骤 3：确认并提交)")
+
       if st.session_state.panier:
         df_cart = pd.DataFrame(st.session_state.panier)
 
@@ -360,14 +370,14 @@ with tab_pos:
             use_container_width=True,
             hide_index=True,
             column_config={
-                "nom": "Produit",
-                "quantite": "Qté",
-                "unite": "Unité",
+                "nom": "Produit (商品)",
+                "quantite": "Qté (数量)",
+                "unite": "Unité (单位)",
                 "prix_unitaire": st.column_config.NumberColumn(
-                    "Prix U. HT", format="%.2f €"
+                    "Prix U. HT (单价)", format="%.2f €"
                 ),
                 "total": st.column_config.NumberColumn(
-                    "Total HT", format="%.2f €"
+                    "Total HT (小计)", format="%.2f €"
                 ),
             },
         )
@@ -377,18 +387,18 @@ with tab_pos:
         total_ttc = total_ht + tva
 
         col_tot1, col_tot2 = st.columns(2)
-        col_tot1.metric("Total HT", f"{total_ht:,.2f} €")
-        col_tot2.metric("Total TTC (20%)", f"{total_ttc:,.2f} €")
+        col_tot1.metric("Total HT (不含税总价)", f"{total_ht:,.2f} €")
+        col_tot2.metric("Total TTC (含税总价 20%)", f"{total_ttc:,.2f} €")
 
         code_suivi = st.text_input(
-            "Code Suivi / N° de Courrier (Optionnel)",
+            "N° de suivi / Courrier (快递单号 / 追踪号 - 可选) :",
             placeholder="Ex: FR-849302-X",
         )
 
-        col_act1, col_act2 = st.columns(2)
-        with col_act1:
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
           if st.button(
-              "✅ Valider & Enregistrer",
+              "✅ VALIDER LA COMMANDE (确认订单)",
               type="primary",
               use_container_width=True,
           ):
@@ -397,7 +407,6 @@ with tab_pos:
               cursor = conn.cursor()
               date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-              # Inspection de la structure de 'commandes'
               cursor.execute("PRAGMA table_info(commandes)")
               cols_cmd = [r[1] for r in cursor.fetchall()]
 
@@ -457,7 +466,6 @@ with tab_pos:
               cursor.execute(q_cmd, vals_cmd)
               cmd_id = cursor.lastrowid
 
-              # Inspection dynamique de la structure de 'lignes_commande'
               cursor.execute("PRAGMA table_info(lignes_commande)")
               cols_lc = [r[1] for r in cursor.fetchall()]
 
@@ -495,25 +503,28 @@ with tab_pos:
 
               st.session_state.panier = []
               st.balloons()
-              st.success(f"🎉 Commande N°{cmd_id} enregistrée avec succès !")
+              st.success(
+                  f"🎉 Commande N°{cmd_id} enregistrée avec succès ! (订单已成功保存)"
+              )
               st.rerun()
 
             except Exception as e:
-              st.error(f"Erreur lors de l'enregistrement : {e}")
+              st.error(f"Erreur (错误) : {e}")
 
-        with col_act2:
-          if st.button("🗑️ Vider le panier", use_container_width=True):
+        with col_b2:
+          if st.button("🗑️ Vider le panier (清空购物车)", use_container_width=True):
             st.session_state.panier = []
             st.rerun()
 
       else:
-        st.info("Votre panier est actuellement vide.")
+        st.info("💡 Votre panier est vide. (购物车是空的)")
+
 
 # ==========================================
-# ONGLET 2 : LOGISTIQUE & HISTORIQUE
+# ONGLET 2 : HISTORIQUE DES COMMANDES
 # ==========================================
-with tab_cmd_hist:
-  st.subheader("Historique des Commandes & Suivi Logistique")
+with tab_cmd:
+  st.subheader("📜 Historique des Commandes ( Order History / 订单历史与追踪 )")
 
   if not df_commandes.empty:
     col_client_name = (
@@ -523,29 +534,40 @@ with tab_cmd_hist:
     )
 
     client_options = (
-        ["Tous"] + df_commandes[col_client_name].dropna().unique().tolist()
+        ["Tous (全部)"]
+        + df_commandes[col_client_name].dropna().unique().tolist()
         if col_client_name
-        else ["Tous"]
+        else ["Tous (全部)"]
     )
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-      filter_client = st.selectbox("Filtrer par Client", client_options)
+      filter_client = st.selectbox(
+          "Filtrer par Client (按客户筛选) :", client_options
+      )
     with col_f2:
       filter_statut = st.selectbox(
-          "Filtrer par Statut",
-          ["Tous", "En préparation", "Expédiée", "Livrée", "Annulée"],
+          "Filtrer par Statut (按状态筛选) :",
+          [
+              "Tous (全部)",
+              "En préparation (准备中)",
+              "Expédiée (已发货)",
+              "Livrée (已送达)",
+              "Annulée (已取消)",
+          ],
       )
 
     df_filtered = df_commandes.copy()
-    if col_client_name and filter_client != "Tous":
+    if col_client_name and filter_client != "Tous (全部)":
       df_filtered = df_filtered[df_filtered[col_client_name] == filter_client]
-    if filter_statut != "Tous":
-      df_filtered = df_filtered[df_filtered["statut"] == filter_statut]
+
+    if filter_statut != "Tous (全部)":
+      clean_statut = filter_statut.split(" (")[0]
+      df_filtered = df_filtered[df_filtered["statut"] == clean_statut]
 
     conn = get_connection()
     for _, cmd in df_filtered.iterrows():
-      status_color = (
+      status_icon = (
           "🟡"
           if cmd["statut"] == "En préparation"
           else ("🔵" if cmd["statut"] == "Expédiée" else "🟢")
@@ -553,92 +575,136 @@ with tab_cmd_hist:
 
       c_name = cmd[col_client_name] if col_client_name else "Client"
       header_text = (
-          f"{status_color} Commande N°{cmd['id']} — {c_name} —"
-          f" {cmd['prix_total']:,.2f} € HT ({cmd['date_commande']})"
+          f"{status_icon} Commande (订单) N°{cmd['id']} — {c_name} —"
+          f" {cmd['prix_total']:,.2f} € ({cmd['date_commande']})"
       )
 
       with st.expander(header_text):
-        c_info1, c_info2 = st.columns(2)
+        c_i1, c_i2 = st.columns(2)
 
-        with c_info1:
-          st.write(f"**Client :** {c_name}")
-          st.write(f"**Date :** {cmd['date_commande']}")
-          st.write(f"**Code Suivi/Courrier :** {cmd['code_courrier'] or 'N/A'}")
+        with c_i1:
+          st.write(f"**Client (客户) :** {c_name}")
+          st.write(f"**Date (日期) :** {cmd['date_commande']}")
+          st.write(
+              f"**Code Suivi (快递单号) :** {cmd['code_courrier'] or 'Aucun (无)'}"
+          )
 
-        with c_info2:
-          new_statut = st.selectbox(
-              "Changer le statut :",
-              ["En préparation", "Expédiée", "Livrée", "Annulée"],
-              index=["En préparation", "Expédiée", "Livrée", "Annulée"].index(
-                  cmd["statut"]
-                  if cmd["statut"]
-                  in ["En préparation", "Expédiée", "Livrée", "Annulée"]
-                  else "En préparation"
-              ),
+        with c_i2:
+          statut_mapping = {
+              "En préparation": "En préparation (准备中)",
+              "Expédiée": "Expédiée (已发货)",
+              "Livrée": "Livrée (已送达)",
+              "Annulée": "Annulée (已取消)",
+          }
+          current_s_display = statut_mapping.get(
+              cmd["statut"], "En préparation (准备中)"
+          )
+
+          new_statut_display = st.selectbox(
+              "Changer le statut (修改状态) :",
+              [
+                  "En préparation (准备中)",
+                  "Expédiée (已发货)",
+                  "Livrée (已送达)",
+                  "Annulée (已取消)",
+              ],
+              index=[
+                  "En préparation (准备中)",
+                  "Expédiée (已发货)",
+                  "Livrée (已送达)",
+                  "Annulée (已取消)",
+              ].index(current_s_display),
               key=f"status_select_{cmd['id']}",
           )
-          if new_statut != cmd["statut"]:
+
+          new_statut_clean = new_statut_display.split(" (")[0]
+
+          if new_statut_clean != cmd["statut"]:
             c_up = get_connection()
             c_up.execute(
                 "UPDATE commandes SET statut = ? WHERE id = ?",
-                (new_statut, cmd["id"]),
+                (new_statut_clean, cmd["id"]),
             )
             c_up.commit()
             c_up.close()
-            st.success("Statut mis à jour !")
+            st.success("Statut mis à jour (状态已更新) !")
             st.rerun()
 
         df_lines = pd.read_sql_query(
-            "SELECT * FROM lignes_commande WHERE commande_id ="
-            f" {cmd['id']}",
+            "SELECT nom_produit, quantite, prix_unitaire, total_ligne FROM"
+            f" lignes_commande WHERE commande_id = {cmd['id']}",
             conn,
         )
-        st.dataframe(df_lines, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_lines,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "nom_produit": "Produit (商品)",
+                "quantite": "Quantité (数量)",
+                "prix_unitaire": st.column_config.NumberColumn(
+                    "Prix U. HT (单价)", format="%.2f €"
+                ),
+                "total_ligne": st.column_config.NumberColumn(
+                    "Total HT (小计)", format="%.2f €"
+                ),
+            },
+        )
 
     conn.close()
   else:
-    st.info("Aucune commande dans l'historique pour le moment.")
+    st.info("Aucune commande enregistrée pour l'instant. (暂无订单记录)")
+
 
 # ==========================================
-# ONGLET 3 : GESTION DU STOCK
+# ONGLET 3 : GESTION DES STOCKS
 # ==========================================
 with tab_stock:
-  st.subheader("Gestion & Entrées en Stock")
+  st.subheader("📦 Gestion des Stocks ( Inventory / 库存管理 )")
 
-  with st.expander("➕ Ajouter un nouveau produit au catalogue", expanded=False):
+  with st.expander(
+      "➕ Ajouter un nouveau produit au catalogue (添加新商品)", expanded=False
+  ):
     with st.form("form_add_stock"):
       cols1, cols2 = st.columns(2)
       with cols1:
-        new_nom = st.text_input("Nom du produit *")
+        new_nom = st.text_input("Nom du produit (商品名称) *")
         new_cat = st.selectbox(
-            "Catégorie *",
+            "Catégorie (商品类别) *",
             [
-                "Café en Grain",
-                "Café Moulu",
-                "Gélules / Capsules",
-                "Machines & Équipements",
-                "Sucre & Encas",
-                "Accessoires & Gobelets",
-                "Autre",
+                "Café en Grain (咖啡豆)",
+                "Café Moulu (咖啡粉)",
+                "Gélules / Capsules (胶囊咖啡)",
+                "Machines & Équipements (咖啡机/设备)",
+                "Sucre & Encas (糖与零食)",
+                "Accessoires & Gobelets (配件与杯子)",
+                "Autre (其他)",
             ],
         )
         new_unite = st.selectbox(
-            "Unité de mesure",
-            ["kg", "unités", "sachets", "cartons", "bouteilles"],
+            "Unité de mesure (计量单位)",
+            ["kg (公斤)", "unités (个/件)", "sachets (包)", "cartons (箱)"],
         )
       with cols2:
-        new_qte = st.number_input("Quantité initiale", min_value=0.0, value=10.0)
+        new_qte = st.number_input(
+            "Quantité initiale en stock (初始库存数量)",
+            min_value=0.0,
+            value=10.0,
+        )
         new_prix_unitaire = st.number_input(
-            "Prix de vente HT (€)", min_value=0.0, value=12.0
+            "Prix de vente HT (€) (售价/不含税)", min_value=0.0, value=12.0
         )
         new_seuil = st.number_input(
-            "Seuil d'alerte stock", min_value=0.0, value=5.0
+            "Seuil d'alerte stock (预警预留库存)", min_value=0.0, value=5.0
         )
 
       if st.form_submit_button(
-          "💾 Enregistrer le Produit", use_container_width=True
+          "💾 Enregistrer le Produit (保存商品)", use_container_width=True
       ):
         if new_nom.strip():
+          clean_cat = new_cat.split(" (")[0]
+          clean_unite = new_unite.split(" (")[0]
+
           conn = get_connection()
           cursor = conn.cursor()
           cursor.execute(
@@ -648,45 +714,60 @@ with tab_stock:
                         """,
               (
                   new_nom.strip(),
-                  new_cat,
+                  clean_cat,
                   float(new_qte),
-                  new_unite,
+                  clean_unite,
                   float(new_seuil),
                   float(new_prix_unitaire),
               ),
           )
           conn.commit()
           conn.close()
-          st.success(f"Produit '{new_nom}' ajouté !")
+          st.success(
+              f"✅ Produit '{new_nom}' ajouté avec succès (商品添加成功) !"
+          )
           st.rerun()
         else:
-          st.error("Nom du produit obligatoire.")
+          st.error("⚠️ Nom du produit obligatoire (商品名称不能为空).")
 
   st.divider()
-  st.subheader("📋 État et Édition du Stock")
+  st.markdown("### Modifiez directement dans le tableau (在表格中直接修改库存) :")
 
   if not df_stock.empty:
     edited_stock = st.data_editor(
-        df_stock,
+        df_stock[
+            [
+                "id",
+                "nom",
+                "categorie",
+                "quantite",
+                "unite",
+                "seuil_alerte",
+                "prix_unitaire",
+            ]
+        ],
         key="editor_stock",
         use_container_width=True,
         hide_index=True,
         column_config={
             "id": "ID",
-            "nom": "Produit",
-            "categorie": "Catégorie",
+            "nom": "Produit (商品)",
+            "categorie": "Catégorie (类别)",
             "quantite": st.column_config.NumberColumn(
-                "Quantité en Stock", min_value=0.0
+                "Stock (库存数量)", min_value=0.0
             ),
-            "unite": "Unité",
-            "seuil_alerte": "Seuil d'Alerte",
+            "unite": "Unité (单位)",
+            "seuil_alerte": "Alerte (预警线)",
             "prix_unitaire": st.column_config.NumberColumn(
-                "Prix Vente HT (€)", format="%.2f €"
+                "Prix HT (€) (单价)", format="%.2f €"
             ),
         },
     )
 
-    if st.button("💾 Sauvegarder les modifications du Stock"):
+    if st.button(
+        "💾 Sauvegarder les modifications du Stock (保存修改)",
+        type="primary",
+    ):
       conn = get_connection()
       cursor = conn.cursor()
       for _, row in edited_stock.iterrows():
@@ -708,39 +789,40 @@ with tab_stock:
         )
       conn.commit()
       conn.close()
-      st.success("Mise à jour du stock effectuée avec succès !")
+      st.success("✅ Stocks mis à jour (库存已保存更新) !")
       st.rerun()
   else:
-    st.info("Le catalogue de stock est vide.")
+    st.info("Le catalogue est vide. (库存为空)")
+
 
 # ==========================================
 # ONGLET 4 : CRM & CLIENTS
 # ==========================================
 with tab_crm:
-  st.subheader("Répertoire & Fiches Clients")
+  st.subheader("👥 Répertoire Clients ( Customer Directory / 客户管理 )")
 
-  with st.expander("➕ Créer une nouvelle fiche client", expanded=False):
+  with st.expander(
+      "➕ Ajouter un nouveau client (添加新客户)", expanded=False
+  ):
     with st.form("form_add_client"):
       cc1, cc2 = st.columns(2)
       with cc1:
-        c_entreprise = st.text_input("Nom de l'Entreprise / Client *")
-        c_contact = st.text_input("Nom du Contact")
-        c_telephone = st.text_input("Téléphone")
-        c_email = st.text_input("Adresse Email")
+        c_entreprise = st.text_input("Nom de l'Entreprise / Client (公司/客户名) *")
+        c_contact = st.text_input("Nom du Contact (联系人姓名)")
+        c_telephone = st.text_input("Téléphone (电话号码)")
+        c_email = st.text_input("Email (电子邮箱)")
       with cc2:
-        c_cafe = st.text_input(
-            "Type de café habituel (ex: Grain Bio Arabica 1kg)"
-        )
-        c_machine = st.checkbox("Machine à café installée en entreprise")
+        c_cafe = st.text_input("Café habituel (常用咖啡 - 例: Grain Bio 1kg)")
+        c_machine = st.checkbox("Machine à café installée (是否有借用咖啡机)")
         c_freq = st.number_input(
-            "Fréquence de réapprovisionnement (en jours)",
+            "Cycle de commande habituel en jours (补货周期/天数)",
             min_value=1,
             value=30,
         )
-        c_adresse = st.text_input("Adresse de livraison")
+        c_adresse = st.text_input("Adresse de livraison (送货地址)")
 
       if st.form_submit_button(
-          "💾 Enregistrer le Client", use_container_width=True
+          "💾 Enregistrer le Client (保存客户)", use_container_width=True
       ):
         if c_entreprise.strip():
           try:
@@ -765,15 +847,17 @@ with tab_crm:
             )
             conn.commit()
             conn.close()
-            st.success(f"Client '{c_entreprise}' ajouté au répertoire !")
+            st.success(
+                f"✅ Client '{c_entreprise}' enregistré (客户已保存) !"
+            )
             st.rerun()
           except sqlite3.IntegrityError:
-            st.error("Un client avec ce nom existe déjà.")
+            st.error("⚠️ Un client avec ce nom existe déjà (该客户已存在).")
         else:
-          st.error("Le nom de l'entreprise est obligatoire.")
+          st.error("⚠️ Le nom est obligatoire (客户名称不能为空).")
 
   st.divider()
-  st.subheader("📋 Liste des Clients Enregistrés")
+  st.markdown("### Liste des Clients (客户列表) :")
 
   if not df_clients.empty:
     cols_display = [
@@ -798,45 +882,37 @@ with tab_crm:
         hide_index=True,
         column_config={
             "id": "ID",
-            "nom_entreprise": "Entreprise",
-            "nom_contact": "Contact",
-            "telephone": "Téléphone",
-            "email": "Email",
-            "type_cafe": "Café Habituel",
-            "machine_installee": "Machine Posée",
-            "frequence_jours": "Cycle (Jours)",
-            "adresse": "Adresse",
+            "nom_entreprise": "Client (公司/客户)",
+            "nom_contact": "Contact (联系人)",
+            "telephone": "Tél (电话)",
+            "email": "Email (邮箱)",
+            "type_cafe": "Café Habituel (常用咖啡)",
+            "machine_installee": "Machine (咖啡机)",
+            "frequence_jours": "Cycle (周期/天)",
+            "adresse": "Adresse (地址)",
         },
     )
   else:
-    st.info("Aucun client dans le répertoire.")
+    st.info("Aucun client enregistré. (暂无客户记录)")
+
 
 # ==========================================
-# ONGLET 5 : RELANCES & RAPPELS
+# ONGLET 5 : RELANCES COMMERCIALES
 # ==========================================
 with tab_relances:
-  st.subheader("🔔 Suivi des Relances Commerciales")
+  st.subheader(
+      "🔔 Clients à recontacter ( Order Reminders / 客户补货/催单提醒 )"
+  )
 
   if clients_a_relancer:
     st.warning(
-        f"⚠️ **{len(clients_a_relancer)} client(s)** ont dépassé leur cycle"
-        " habituel de réapprovisionnement !"
+        f"⚠️ **{len(clients_a_relancer)} client(s)** n'ont pas commandé depuis"
+        " longtemps ! (有客户超过预定周期未下单，建议联系！)"
     )
 
     df_rel = pd.DataFrame(clients_a_relancer)
-    st.dataframe(
-        df_rel[[
-            "Entreprise",
-            "Contact",
-            "Téléphone",
-            "Café habituel",
-            "Dernière Commande",
-            "Retard (Jours)",
-        ]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    st.dataframe(df_rel, use_container_width=True, hide_index=True)
   else:
     st.success(
-        "✅ Aucun client en retard de réapprovisionnement pour le moment !"
+        "✅ Tous vos clients sont à jour ! Aucun retard détecté. (所有客户订单正常，无延迟！)"
     )
