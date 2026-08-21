@@ -120,6 +120,7 @@ def init_db():
     if col_name not in existing_cols:
       cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
 
+  # Migration dynamique des tables
   safe_add_column("clients", "type_cafe TEXT")
   safe_add_column("clients", "machine_installee INTEGER DEFAULT 0")
   safe_add_column("clients", "frequence_jours INTEGER DEFAULT 30")
@@ -129,6 +130,9 @@ def init_db():
   safe_add_column("commandes", "client_nom TEXT DEFAULT ''")
   safe_add_column("commandes", "code_courrier TEXT")
   safe_add_column("commandes", "statut TEXT DEFAULT 'En préparation'")
+
+  safe_add_column("lignes_commande", "total_ligne REAL DEFAULT 0")
+  safe_add_column("lignes_commande", "prix_unitaire REAL DEFAULT 0")
 
   safe_add_column("stock", "prix_achat REAL DEFAULT 0")
 
@@ -393,91 +397,96 @@ with tab_pos:
               cursor = conn.cursor()
               date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
+              # Inspection de la structure de 'commandes'
               cursor.execute("PRAGMA table_info(commandes)")
-              existing_cols = [r[1] for r in cursor.fetchall()]
+              cols_cmd = [r[1] for r in cursor.fetchall()]
 
-              fields = []
-              values = []
+              fields_cmd = []
+              vals_cmd = []
 
-              # Gestion dynamique de toutes les anciennes colonnes possibles dans 'commandes'
-              if "client_id" in existing_cols:
-                fields.append("client_id")
-                values.append(int(client_row["id"]))
+              if "client_id" in cols_cmd:
+                fields_cmd.append("client_id")
+                vals_cmd.append(int(client_row["id"]))
 
-              if "client_nom" in existing_cols:
-                fields.append("client_nom")
-                values.append(str(selected_client_name))
+              if "client_nom" in cols_cmd:
+                fields_cmd.append("client_nom")
+                vals_cmd.append(str(selected_client_name))
 
-              if "client" in existing_cols:
-                fields.append("client")
-                values.append(str(selected_client_name))
+              if "client" in cols_cmd:
+                fields_cmd.append("client")
+                vals_cmd.append(str(selected_client_name))
 
-              first_item_nom = (
+              first_nom = (
                   st.session_state.panier[0]["nom"]
                   if st.session_state.panier
                   else "Produit"
               )
-              first_item_pid = (
+              first_pid = (
                   st.session_state.panier[0]["produit_id"]
                   if st.session_state.panier
                   else 1
               )
 
-              if "nom_produit" in existing_cols:
-                fields.append("nom_produit")
-                values.append(first_item_nom)
+              if "nom_produit" in cols_cmd:
+                fields_cmd.append("nom_produit")
+                vals_cmd.append(first_nom)
 
-              if "produit" in existing_cols:
-                fields.append("produit")
-                values.append(first_item_nom)
+              if "produit" in cols_cmd:
+                fields_cmd.append("produit")
+                vals_cmd.append(first_nom)
 
-              if "produit_id" in existing_cols:
-                fields.append("produit_id")
-                values.append(first_item_pid)
+              if "produit_id" in cols_cmd:
+                fields_cmd.append("produit_id")
+                vals_cmd.append(first_pid)
 
-              if "quantite" in existing_cols:
-                fields.append("quantite")
-                values.append(st.session_state.panier[0]["quantite"])
+              if "quantite" in cols_cmd:
+                fields_cmd.append("quantite")
+                vals_cmd.append(st.session_state.panier[0]["quantite"])
 
-              fields.extend(["date_commande", "code_courrier", "prix_total", "statut"])
-              values.extend([
+              fields_cmd.extend(
+                  ["date_commande", "code_courrier", "prix_total", "statut"]
+              )
+              vals_cmd.extend([
                   date_now,
                   str(code_suivi).strip(),
                   float(total_ht),
                   "En préparation",
               ])
 
-              placeholders = ", ".join(["?"] * len(fields))
-              fields_str = ", ".join(fields)
-
-              query = (
-                  f"INSERT INTO commandes ({fields_str}) VALUES ({placeholders})"
-              )
-              cursor.execute(query, values)
-
+              q_cmd = f"INSERT INTO commandes ({', '.join(fields_cmd)}) VALUES ({', '.join(['?']*len(fields_cmd))})"
+              cursor.execute(q_cmd, vals_cmd)
               cmd_id = cursor.lastrowid
 
+              # Inspection dynamique de la structure de 'lignes_commande'
+              cursor.execute("PRAGMA table_info(lignes_commande)")
+              cols_lc = [r[1] for r in cursor.fetchall()]
+
               for item in st.session_state.panier:
+                fields_lc = ["commande_id", "produit_id", "quantite"]
+                vals_lc = [
+                    int(cmd_id),
+                    int(item["produit_id"]),
+                    float(item["quantite"]),
+                ]
+
+                if "nom_produit" in cols_lc:
+                  fields_lc.append("nom_produit")
+                  vals_lc.append(str(item["nom"]))
+
+                if "prix_unitaire" in cols_lc:
+                  fields_lc.append("prix_unitaire")
+                  vals_lc.append(float(item["prix_unitaire"]))
+
+                if "total_ligne" in cols_lc:
+                  fields_lc.append("total_ligne")
+                  vals_lc.append(float(item["total"]))
+
+                q_lc = f"INSERT INTO lignes_commande ({', '.join(fields_lc)}) VALUES ({', '.join(['?']*len(fields_lc))})"
+                cursor.execute(q_lc, vals_lc)
+
                 cursor.execute(
-                    """
-                                    INSERT INTO lignes_commande (commande_id, produit_id, nom_produit, quantite, prix_unitaire, total_ligne)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                    """,
-                    (
-                        int(cmd_id),
-                        int(item["produit_id"]),
-                        str(item["nom"]),
-                        float(item["quantite"]),
-                        float(item["prix_unitaire"]),
-                        float(item["total"]),
-                    ),
-                )
-                cursor.execute(
-                    """
-                                    UPDATE stock 
-                                    SET quantite = MAX(0, quantite - ?) 
-                                    WHERE id = ?
-                                    """,
+                    "UPDATE stock SET quantite = MAX(0, quantite - ?) WHERE id"
+                    " = ?",
                     (float(item["quantite"]), int(item["produit_id"])),
                 )
 
@@ -486,9 +495,7 @@ with tab_pos:
 
               st.session_state.panier = []
               st.balloons()
-              st.success(
-                  f"🎉 Commande N°{cmd_id} enregistrée avec succès !"
-              )
+              st.success(f"🎉 Commande N°{cmd_id} enregistrée avec succès !")
               st.rerun()
 
             except Exception as e:
@@ -582,9 +589,8 @@ with tab_cmd_hist:
             st.rerun()
 
         df_lines = pd.read_sql_query(
-            "SELECT nom_produit as Produit, quantite as Quantité, prix_unitaire"
-            " as 'Prix U. HT', total_ligne as 'Total HT' FROM lignes_commande"
-            f" WHERE commande_id = {cmd['id']}",
+            "SELECT * FROM lignes_commande WHERE commande_id ="
+            f" {cmd['id']}",
             conn,
         )
         st.dataframe(df_lines, use_container_width=True, hide_index=True)
