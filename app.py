@@ -14,13 +14,10 @@ def get_connection():
   return sqlite3.connect("database.db")
 
 
-# Initialisation et migration automatique de la base de données
+# Initialisation de la base de données
 def init_db():
   conn = get_connection()
   cursor = conn.cursor()
-
-  # Suppression propre si ancienne version incompatible
-  cursor.execute("DROP TABLE IF EXISTS clients")
 
   # Table Stock
   cursor.execute("""
@@ -39,8 +36,8 @@ def init_db():
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nom_contact TEXT,
         nom_entreprise TEXT NOT NULL,
+        nom_contact TEXT,
         adresse TEXT,
         telephone TEXT,
         email TEXT,
@@ -70,11 +67,13 @@ def init_db():
         produit_id INTEGER NOT NULL,
         nom_produit TEXT NOT NULL,
         quantite REAL NOT NULL,
-        prix_unitaire REAL NOT NULL
+        prix_unitaire REAL NOT NULL,
+        FOREIGN KEY (commande_id) REFERENCES commandes (id),
+        FOREIGN KEY (produit_id) REFERENCES stock (id)
     )
     """)
 
-  # Exemples initiaux
+  # Exemple de données stock si vide
   cursor.execute("SELECT COUNT(*) FROM stock")
   if cursor.fetchone()[0] == 0:
     exemples_stock = [
@@ -100,10 +99,10 @@ def init_db():
 
 init_db()
 
-# Titre
+# Titre principal
 st.title("☕ ERP Café - Gestion globale & CRM")
 
-# Données actuelles
+# Chargement des données
 conn = get_connection()
 df_stock = pd.read_sql_query("SELECT * FROM stock", conn)
 df_clients = pd.read_sql_query("SELECT * FROM clients", conn)
@@ -112,7 +111,7 @@ df_commandes = pd.read_sql_query(
 )
 conn.close()
 
-# CALCUL DES RAPPELS (Clients à relancer)
+# Calcul des rappels de relance
 clients_a_relancer = []
 if not df_clients.empty and not df_commandes.empty:
   actuel = datetime.now()
@@ -132,13 +131,13 @@ if not df_clients.empty and not df_commandes.empty:
         retard = (actuel - prochaine_date).days
         clients_a_relancer.append({
             "Entreprise": cli["nom_entreprise"],
-            "Contact": cli["nom_contact"],
-            "Téléphone": cli["telephone"],
+            "Contact": cli["nom_contact"] or "N/A",
+            "Téléphone": cli["telephone"] or "N/A",
             "Dernière Commande": derniere_date_str,
             "Retard (Jours)": retard,
         })
 
-# KPIs
+# Indicateurs clés (KPIs)
 c1, c2, c3, c4 = st.columns(4)
 valeur_stock = (
     (df_stock["quantite"] * df_stock["prix_unitaire"]).sum()
@@ -156,7 +155,7 @@ c4.metric("Commandes Totales", len(df_commandes))
 
 st.divider()
 
-# Navigation
+# Navigation par onglets
 tab_stock, tab_commande, tab_relance, tab_clients, tab_historique = st.tabs([
     "📦 Gestion Stock",
     "🛒 Passer une Commande",
@@ -165,7 +164,7 @@ tab_stock, tab_commande, tab_relance, tab_clients, tab_historique = st.tabs([
     "📜 Historique Commandes",
 ])
 
-# --- ONGLET 1 : STOCK ---
+# --- ONGLET 1 : GESTION DU STOCK ---
 with tab_stock:
   st.subheader("État du Stock (Modifiable)")
   if not df_stock.empty:
@@ -200,14 +199,14 @@ with tab_stock:
       st.success("Stock mis à jour !")
       st.rerun()
 
-# --- ONGLET 2 : NOUVELLE COMMANDE ---
+# --- ONGLET 2 : PASSER UNE COMMANDE ---
 with tab_commande:
   st.subheader("Créer une Commande Multi-Produits")
 
   if df_clients.empty:
     st.warning(
-        "⚠️ Veillez d'abord ajouter au moins un client dans l'onglet 'Répertoire"
-        " Clients'."
+        "⚠️ Aucun client enregistré. Allez d'abord dans l'onglet 'Répertoire"
+        " Clients' pour en ajouter un."
     )
   else:
     if "panier" not in st.session_state:
@@ -216,7 +215,7 @@ with tab_commande:
     c_cmd1, c_cmd2 = st.columns([1, 1])
 
     with c_cmd1:
-      st.write("### 1. Client & Tarif")
+      st.write("### 1. Sélection du Client")
       client_choisi_nom = st.selectbox(
           "Sélectionner le Client", df_clients["nom_entreprise"].tolist()
       )
@@ -224,14 +223,8 @@ with tab_commande:
           df_clients["nom_entreprise"] == client_choisi_nom
       ].iloc[0]
 
-      a_machine = client_info["machine_installee"] == 1
-      if a_machine:
-        st.success(
-            "💡 **Machine installée chez ce client : Remise de 15 % appliquée sur"
-            " le café !**"
-        )
-      else:
-        st.info("Client standard (Tarif normal)")
+      if client_info["machine_installee"] == 1:
+        st.info("ℹ️ Ce client a une machine installée.")
 
       st.write("### 2. Sélection des produits")
       if not df_stock.empty:
@@ -251,9 +244,21 @@ with tab_commande:
             value=1.0,
         )
 
-        prix_appl = prod_choisi["prix_unitaire"]
-        if a_machine and prod_choisi["categorie"] == "Café":
-          prix_appl = prix_appl * 0.85
+        # Gestion manuelle de la remise
+        remise_pct = st.number_input(
+            "Remise sur ce produit (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.0,
+            step=1.0,
+        )
+        prix_final = prod_choisi["prix_unitaire"] * (1 - (remise_pct / 100.0))
+
+        if remise_pct > 0:
+          st.write(
+              f"Prix après remise : **{prix_final:,.2f} €** /"
+              f" {prod_choisi['unite']}"
+          )
 
         if st.button("➕ Ajouter au panier"):
           st.session_state.panier.append({
@@ -261,8 +266,8 @@ with tab_commande:
               "nom": prod_choisi["nom"],
               "quantite": qte_souhaitee,
               "unite": prod_choisi["unite"],
-              "prix_unitaire": prix_appl,
-              "total": qte_souhaitee * prix_appl,
+              "prix_unitaire": prix_final,
+              "total": qte_souhaitee * prix_final,
           })
           st.success("Produit ajouté !")
 
@@ -325,20 +330,20 @@ with tab_commande:
           conn.close()
 
           st.session_state.panier = []
-          st.success(f"Commande N°{cmd_id} enregistrée sans erreur !")
+          st.success(f"Commande N°{cmd_id} enregistrée !")
           st.rerun()
 
         if st.button("🗑️ Vider le panier"):
           st.session_state.panier = []
           st.rerun()
 
-# --- ONGLET 3 : RELANCES CLIENTS ---
+# --- ONGLET 3 : RAPPELS & RELANCES ---
 with tab_relance:
-  st.subheader("🔔 Clients ayant dépassé leur fréquence de commande")
+  st.subheader("🔔 Clients à relancer")
   if clients_a_relancer:
     st.error(
-        f"⚠️ **{len(clients_a_relancer)} client(s) devrai(ent) déjà avoir"
-        " recommandé du café !**"
+        f"⚠️ **{len(clients_a_relancer)} client(s) devrai(ent) avoir recommandé"
+        " du café !**"
     )
     st.dataframe(
         pd.DataFrame(clients_a_relancer),
@@ -346,63 +351,83 @@ with tab_relance:
         hide_index=True,
     )
   else:
-    st.success("✅ Aucun retard de commande détecté pour le moment.")
+    st.info(
+        "Toutes les relances sont à jour ou aucune commande passée pour le"
+        " moment."
+    )
 
 # --- ONGLET 4 : REPERTOIRE CLIENTS ---
 with tab_clients:
-  st.subheader("Gestion de la Base Clients")
+  st.subheader("Ajouter un client")
 
-  with st.expander("➕ Ajouter un nouveau client"):
-    with st.form("form_add_client"):
-      f1, f2 = st.columns(2)
-      with f1:
-        nom_ent = st.text_input("Nom de l'Entreprise *")
-        nom_cont = st.text_input("Nom du Contact")
-        tel = st.text_input("Téléphone")
-      with f2:
-        email = st.text_input("Email")
-        adr = st.text_area("Adresse complète", height=68)
+  # Formulaire direct sans champ strictement obligatoire sauf le Nom
+  nom_entreprise = st.text_input("Nom du Client / Entreprise *")
 
-      f3, f4 = st.columns(2)
-      with f3:
-        machine = st.checkbox("Machine à café mise à disposition chez eux ?")
-      with f4:
-        freq = st.number_input(
-            "Fréquence de commande habituelle (en jours)",
-            min_value=1,
-            value=30,
-        )
+  col_a, col_b = st.columns(2)
+  with col_a:
+    nom_contact = st.text_input("Nom du contact (Optionnel)")
+    telephone = st.text_input("Téléphone (Optionnel)")
+  with col_b:
+    email = st.text_input("Email (Optionnel)")
+    adresse = st.text_input("Adresse (Optionnel)")
 
-      if st.form_submit_button("Enregistrer le client"):
-        if nom_ent:
-          conn = get_connection()
-          cursor = conn.cursor()
-          cursor.execute(
-              """
-                    INSERT INTO clients (nom_entreprise, nom_contact, telephone, email, adresse, machine_installee, frequence_jours)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-              (
-                  nom_ent,
-                  nom_cont,
-                  tel,
-                  email,
-                  adr,
-                  1 if machine else 0,
-                  int(freq),
-              ),
-          )
-          conn.commit()
-          conn.close()
-          st.success("Client ajouté !")
-          st.rerun()
+  col_c, col_d = st.columns(2)
+  with col_c:
+    machine_inst = st.checkbox("Machine à café posée chez ce client ?")
+  with col_d:
+    frequence = st.number_input(
+        "Rappel tous les combien de jours ?", min_value=1, value=30
+    )
 
+  if st.button("💾 Enregistrer le Client", type="primary"):
+    if not nom_entreprise.strip():
+      st.error("Veuillez saisir au moins le Nom du Client / Entreprise.")
+    else:
+      conn = get_connection()
+      cursor = conn.cursor()
+      cursor.execute(
+          """
+            INSERT INTO clients (nom_entreprise, nom_contact, telephone, email, adresse, machine_installee, frequence_jours)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+          (
+              nom_entreprise.strip(),
+              nom_contact.strip(),
+              telephone.strip(),
+              email.strip(),
+              adresse.strip(),
+              1 if machine_inst else 0,
+              int(frequence),
+          ),
+      )
+      conn.commit()
+      conn.close()
+      st.success(f"Client '{nom_entreprise}' enregistré avec succès !")
+      st.rerun()
+
+  st.divider()
+  st.subheader("📋 Liste des Clients enregistrés")
   if not df_clients.empty:
-    st.dataframe(df_clients, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_clients[[
+            "id",
+            "nom_entreprise",
+            "nom_contact",
+            "telephone",
+            "email",
+            "adresse",
+            "machine_installee",
+            "frequence_jours",
+        ]],
+        use_container_width=True,
+        hide_index=True,
+    )
+  else:
+    st.info("Aucun client dans la base de données.")
 
-# --- ONGLET 5 : HISTORIQUE ---
+# --- ONGLET 5 : HISTORIQUE COMMANDES ---
 with tab_historique:
-  st.subheader("Historique des Commandes & Suivis")
+  st.subheader("Historique des Commandes")
   if not df_commandes.empty:
     conn = get_connection()
     for _, cmd in df_commandes.iterrows():
@@ -423,3 +448,5 @@ with tab_historique:
         )
         st.dataframe(df_l, use_container_width=True, hide_index=True)
     conn.close()
+  else:
+    st.info("Aucune commande enregistrée pour l'instant.")
