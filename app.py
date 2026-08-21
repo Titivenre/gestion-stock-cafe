@@ -3,23 +3,22 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-# Configuration de la page
+# Configuration
 st.set_page_config(
     page_title="ERP Café & Clients", page_icon="☕", layout="wide"
 )
 
 
-# Connexion à la base de données
+# Connexion BDD
 def get_connection():
   return sqlite3.connect("database.db")
 
 
-# Initialisation de la base de données
+# Initialisation des tables BDD
 def init_db():
   conn = get_connection()
   cursor = conn.cursor()
 
-  # Table Stock
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS stock (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +31,6 @@ def init_db():
     )
     """)
 
-  # Table Clients
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,12 +39,18 @@ def init_db():
         adresse TEXT,
         telephone TEXT,
         email TEXT,
+        type_cafe TEXT,
         machine_installee INTEGER DEFAULT 0,
         frequence_jours INTEGER DEFAULT 30
     )
     """)
 
-  # Table Commandes
+  # Migration légère si la colonne type_cafe n'existait pas
+  try:
+    cursor.execute("ALTER TABLE clients ADD COLUMN type_cafe TEXT")
+  except sqlite3.OperationalError:
+    pass  # La colonne existe déjà
+
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS commandes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,7 +63,6 @@ def init_db():
     )
     """)
 
-  # Table Lignes de commande
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS lignes_commande (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,31 +70,9 @@ def init_db():
         produit_id INTEGER NOT NULL,
         nom_produit TEXT NOT NULL,
         quantite REAL NOT NULL,
-        prix_unitaire REAL NOT NULL,
-        FOREIGN KEY (commande_id) REFERENCES commandes (id),
-        FOREIGN KEY (produit_id) REFERENCES stock (id)
+        prix_unitaire REAL NOT NULL
     )
     """)
-
-  # Exemple de données stock si vide
-  cursor.execute("SELECT COUNT(*) FROM stock")
-  if cursor.fetchone()[0] == 0:
-    exemples_stock = [
-        ("Café Arabica Grain Colombie", "Café", 120.0, "kg", 20.0, 18.50),
-        ("Café Robusta Moulu Viêt Nam", "Café", 15.0, "kg", 25.0, 14.00),
-        (
-            "Sacs d'emballage 1kg",
-            "Conditionnement",
-            450.0,
-            "unités",
-            100.0,
-            0.40,
-        ),
-    ]
-    cursor.executemany("""
-        INSERT INTO stock (nom, categorie, quantite, unite, seuil_alerte, prix_unitaire)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """, exemples_stock)
 
   conn.commit()
   conn.close()
@@ -99,10 +80,10 @@ def init_db():
 
 init_db()
 
-# Titre principal
+# Titre
 st.title("☕ ERP Café - Gestion globale & CRM")
 
-# Chargement des données
+# Chargement données
 conn = get_connection()
 df_stock = pd.read_sql_query("SELECT * FROM stock", conn)
 df_clients = pd.read_sql_query("SELECT * FROM clients", conn)
@@ -111,7 +92,7 @@ df_commandes = pd.read_sql_query(
 )
 conn.close()
 
-# Calcul des rappels de relance
+# Relances
 clients_a_relancer = []
 if not df_clients.empty and not df_commandes.empty:
   actuel = datetime.now()
@@ -132,30 +113,31 @@ if not df_clients.empty and not df_commandes.empty:
         clients_a_relancer.append({
             "Entreprise": cli["nom_entreprise"],
             "Contact": cli["nom_contact"] or "N/A",
+            "Café habituel": cli.get("type_cafe", "Non précisé"),
             "Téléphone": cli["telephone"] or "N/A",
             "Dernière Commande": derniere_date_str,
             "Retard (Jours)": retard,
         })
 
-# Indicateurs clés (KPIs)
+# KPIs
 c1, c2, c3, c4 = st.columns(4)
 valeur_stock = (
     (df_stock["quantite"] * df_stock["prix_unitaire"]).sum()
     if not df_stock.empty
     else 0
 )
-c1.metric("Valeur du Stock", f"{valeur_stock:,.2f} €")
-c2.metric("Clients Enregistrés", len(df_clients))
+c1.metric("Valeur Stock", f"{valeur_stock:,.2f} €")
+c2.metric("Clients", len(df_clients))
 c3.metric(
     "🚨 Relances à Faire",
     len(clients_a_relancer),
     delta_color="inverse",
 )
-c4.metric("Commandes Totales", len(df_commandes))
+c4.metric("Commandes Total", len(df_commandes))
 
 st.divider()
 
-# Navigation par onglets
+# Navigation
 tab_stock, tab_commande, tab_relance, tab_clients, tab_historique = st.tabs([
     "📦 Gestion Stock",
     "🛒 Passer une Commande",
@@ -164,9 +146,74 @@ tab_stock, tab_commande, tab_relance, tab_clients, tab_historique = st.tabs([
     "📜 Historique Commandes",
 ])
 
-# --- ONGLET 1 : GESTION DU STOCK ---
+# --- ONGLET 1 : STOCK ---
 with tab_stock:
-  st.subheader("État du Stock (Modifiable)")
+  st.subheader("➕ Ajouter un nouveau produit au stock")
+
+  categories_de_base = [
+      "Café",
+      "Machines & Équipements",
+      "Sucre",
+      "Biscuits",
+      "Alcools & Vins",
+      "Gobelets",
+      "Autre (créer une catégorie)",
+  ]
+
+  with st.form("add_stock_form"):
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+      nom_prod = st.text_input("Nom du produit *")
+      cat_choix = st.selectbox("Catégorie *", categories_de_base)
+      cat_custom = st.text_input(
+          "Si 'Autre', tapez la nouvelle catégorie ici :"
+      )
+    with col_s2:
+      qte_prod = st.number_input(
+          "Quantité initiale", min_value=0.0, value=10.0, step=1.0
+      )
+      unite_prod = st.selectbox(
+          "Unité", ["kg", "unités", "sachets", "cartons", "bouteilles", "paquets"]
+      )
+      prix_prod = st.number_input(
+          "Prix unitaire HT (€)", min_value=0.0, value=5.0, step=0.5
+      )
+      seuil_prod = st.number_input(
+          "Seuil d'alerte stock bas", min_value=0.0, value=5.0
+      )
+
+    if st.form_submit_button("➕ Ajouter au Stock"):
+      cat_final = (
+          cat_custom.strip()
+          if cat_choix == "Autre (créer une catégorie)" and cat_custom.strip()
+          else cat_choix
+      )
+      if nom_prod.strip():
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+                INSERT INTO stock (nom, categorie, quantite, unite, seuil_alerte, prix_unitaire)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+            (
+                nom_prod.strip(),
+                cat_final,
+                qte_prod,
+                unite_prod,
+                seuil_prod,
+                prix_prod,
+            ),
+        )
+        conn.commit()
+        conn.close()
+        st.success(f"Produit '{nom_prod}' ajouté avec succès !")
+        st.rerun()
+      else:
+        st.error("Veuillez saisir au moins un nom de produit.")
+
+  st.divider()
+  st.subheader("📋 État du Stock (Modifiable en direct)")
   if not df_stock.empty:
     edited_df = st.data_editor(
         df_stock,
@@ -174,7 +221,7 @@ with tab_stock:
         use_container_width=True,
         hide_index=True,
     )
-    if st.button("💾 Sauvegarder les modifications du stock"):
+    if st.button("💾 Sauvegarder les modifications du tableau stock"):
       conn = get_connection()
       cursor = conn.cursor()
       for _, row in edited_df.iterrows():
@@ -196,18 +243,19 @@ with tab_stock:
         )
       conn.commit()
       conn.close()
-      st.success("Stock mis à jour !")
+      st.success("Modifications du stock enregistrées !")
       st.rerun()
+  else:
+    st.info("Le stock est vide. Utilisez le formulaire ci-dessus pour ajouter des articles.")
 
-# --- ONGLET 2 : PASSER UNE COMMANDE ---
+# --- ONGLET 2 : COMMANDE ---
 with tab_commande:
-  st.subheader("Créer une Commande Multi-Produits")
+  st.subheader("Créer une Commande")
 
   if df_clients.empty:
-    st.warning(
-        "⚠️ Aucun client enregistré. Allez d'abord dans l'onglet 'Répertoire"
-        " Clients' pour en ajouter un."
-    )
+    st.warning("⚠️ Enregistrez d'abord un client dans le 'Répertoire Clients'.")
+  elif df_stock.empty:
+    st.warning("⚠️ Aucun produit en stock. Ajoutez-en dans l'onglet 'Gestion Stock'.")
   else:
     if "panier" not in st.session_state:
       st.session_state.panier = []
@@ -217,62 +265,56 @@ with tab_commande:
     with c_cmd1:
       st.write("### 1. Sélection du Client")
       client_choisi_nom = st.selectbox(
-          "Sélectionner le Client", df_clients["nom_entreprise"].tolist()
+          "Client", df_clients["nom_entreprise"].tolist()
       )
       client_info = df_clients[
           df_clients["nom_entreprise"] == client_choisi_nom
       ].iloc[0]
 
-      if client_info["machine_installee"] == 1:
-        st.info("ℹ️ Ce client a une machine installée.")
+      st.info(
+          f"☕ **Café habituel :** {client_info.get('type_cafe', 'Non précisé')}  \n"
+          f"⚙️ **Machine posée :** {'Oui' if client_info['machine_installee'] == 1 else 'Non'}"
+      )
 
-      st.write("### 2. Sélection des produits")
-      if not df_stock.empty:
-        prod_options = {
-            f"{row['nom']} (Stock: {row['quantite']} {row['unite']})": row
-            for _, row in df_stock.iterrows()
-        }
-        choix_prod_nom = st.selectbox(
-            "Produit à ajouter", list(prod_options.keys())
-        )
-        prod_choisi = prod_options[choix_prod_nom]
+      st.write("### 2. Ajouter des produits")
+      prod_options = {
+          f"[{row['categorie']}] {row['nom']} (Stock: {row['quantite']} {row['unite']})": row
+          for _, row in df_stock.iterrows()
+      }
+      choix_prod_nom = st.selectbox("Produit", list(prod_options.keys()))
+      prod_choisi = prod_options[choix_prod_nom]
 
-        qte_souhaitee = st.number_input(
-            f"Quantité ({prod_choisi['unite']})",
-            min_value=0.1,
-            max_value=float(prod_choisi["quantite"]),
-            value=1.0,
-        )
+      qte_souhaitee = st.number_input(
+          f"Quantité ({prod_choisi['unite']})",
+          min_value=0.1,
+          max_value=max(float(prod_choisi["quantite"]), 0.1),
+          value=1.0,
+      )
 
-        # Gestion manuelle de la remise
-        remise_pct = st.number_input(
-            "Remise sur ce produit (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=0.0,
-            step=1.0,
-        )
-        prix_final = prod_choisi["prix_unitaire"] * (1 - (remise_pct / 100.0))
+      remise_pct = st.number_input(
+          "Remise personnalisée sur cet article (%)",
+          min_value=0.0,
+          max_value=100.0,
+          value=0.0,
+      )
+      prix_final = prod_choisi["prix_unitaire"] * (1 - (remise_pct / 100.0))
 
-        if remise_pct > 0:
-          st.write(
-              f"Prix après remise : **{prix_final:,.2f} €** /"
-              f" {prod_choisi['unite']}"
-          )
+      if remise_pct > 0:
+        st.write(f"Prix remisé : **{prix_final:,.2f} €**")
 
-        if st.button("➕ Ajouter au panier"):
-          st.session_state.panier.append({
-              "produit_id": prod_choisi["id"],
-              "nom": prod_choisi["nom"],
-              "quantite": qte_souhaitee,
-              "unite": prod_choisi["unite"],
-              "prix_unitaire": prix_final,
-              "total": qte_souhaitee * prix_final,
-          })
-          st.success("Produit ajouté !")
+      if st.button("➕ Ajouter la ligne au panier"):
+        st.session_state.panier.append({
+            "produit_id": prod_choisi["id"],
+            "nom": prod_choisi["nom"],
+            "quantite": qte_souhaitee,
+            "unite": prod_choisi["unite"],
+            "prix_unitaire": prix_final,
+            "total": qte_souhaitee * prix_final,
+        })
+        st.success("Ajouté !")
 
     with c_cmd2:
-      st.write("### 3. Panier & Validation")
+      st.write("### 3. Récapitulatif du Panier")
       if st.session_state.panier:
         df_p = pd.DataFrame(st.session_state.panier)
         st.dataframe(
@@ -286,7 +328,7 @@ with tab_commande:
 
         code_courrier_input = st.text_input("Code Suivi / Courrier (Optionnel)")
 
-        if st.button("✅ Valider la Commande", type="primary"):
+        if st.button("✅ Valider et Enregistrer la Commande", type="primary"):
           conn = get_connection()
           cursor = conn.cursor()
           date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -337,13 +379,13 @@ with tab_commande:
           st.session_state.panier = []
           st.rerun()
 
-# --- ONGLET 3 : RAPPELS & RELANCES ---
+# --- ONGLET 3 : RELANCES ---
 with tab_relance:
-  st.subheader("🔔 Clients à relancer")
+  st.subheader("🔔 Clients à relancer pour commander")
   if clients_a_relancer:
     st.error(
-        f"⚠️ **{len(clients_a_relancer)} client(s) devrai(ent) avoir recommandé"
-        " du café !**"
+        f"⚠️ **{len(clients_a_relancer)} client(s) ont dépassé leur date"
+        " habituelle de commande !**"
     )
     st.dataframe(
         pd.DataFrame(clients_a_relancer),
@@ -351,44 +393,39 @@ with tab_relance:
         hide_index=True,
     )
   else:
-    st.info(
-        "Toutes les relances sont à jour ou aucune commande passée pour le"
-        " moment."
-    )
+    st.info("Aucune relance à prévoir pour le moment.")
 
 # --- ONGLET 4 : REPERTOIRE CLIENTS ---
 with tab_clients:
-  st.subheader("Ajouter un client")
+  st.subheader("➕ Ajouter un Client")
 
-  # Formulaire direct sans champ strictement obligatoire sauf le Nom
   nom_entreprise = st.text_input("Nom du Client / Entreprise *")
 
-  col_a, col_b = st.columns(2)
-  with col_a:
+  c1_cli, c2_cli = st.columns(2)
+  with c1_cli:
+    type_cafe = st.text_input(
+        "Type de café habituel (ex: Arabica Grain, Grain Bio, Robusta Moulu)"
+    )
     nom_contact = st.text_input("Nom du contact (Optionnel)")
     telephone = st.text_input("Téléphone (Optionnel)")
-  with col_b:
+  with c2_cli:
+    machine_inst = st.checkbox("Machine à café posée chez eux ?")
     email = st.text_input("Email (Optionnel)")
     adresse = st.text_input("Adresse (Optionnel)")
-
-  col_c, col_d = st.columns(2)
-  with col_c:
-    machine_inst = st.checkbox("Machine à café posée chez ce client ?")
-  with col_d:
     frequence = st.number_input(
         "Rappel tous les combien de jours ?", min_value=1, value=30
     )
 
   if st.button("💾 Enregistrer le Client", type="primary"):
     if not nom_entreprise.strip():
-      st.error("Veuillez saisir au moins le Nom du Client / Entreprise.")
+      st.error("Veuillez remplir au moins le Nom du Client / Entreprise.")
     else:
       conn = get_connection()
       cursor = conn.cursor()
       cursor.execute(
           """
-            INSERT INTO clients (nom_entreprise, nom_contact, telephone, email, adresse, machine_installee, frequence_jours)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clients (nom_entreprise, nom_contact, telephone, email, adresse, type_cafe, machine_installee, frequence_jours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
           (
               nom_entreprise.strip(),
@@ -396,36 +433,38 @@ with tab_clients:
               telephone.strip(),
               email.strip(),
               adresse.strip(),
+              type_cafe.strip(),
               1 if machine_inst else 0,
               int(frequence),
           ),
       )
       conn.commit()
       conn.close()
-      st.success(f"Client '{nom_entreprise}' enregistré avec succès !")
+      st.success(f"Client '{nom_entreprise}' enregistré !")
       st.rerun()
 
   st.divider()
-  st.subheader("📋 Liste des Clients enregistrés")
+  st.subheader("📋 Répertoire des Clients")
   if not df_clients.empty:
     st.dataframe(
         df_clients[[
             "id",
             "nom_entreprise",
+            "type_cafe",
+            "machine_installee",
+            "frequence_jours",
             "nom_contact",
             "telephone",
             "email",
             "adresse",
-            "machine_installee",
-            "frequence_jours",
         ]],
         use_container_width=True,
         hide_index=True,
     )
   else:
-    st.info("Aucun client dans la base de données.")
+    st.info("Aucun client enregistré pour l'instant.")
 
-# --- ONGLET 5 : HISTORIQUE COMMANDES ---
+# --- ONGLET 5 : HISTORIQUE ---
 with tab_historique:
   st.subheader("Historique des Commandes")
   if not df_commandes.empty:
@@ -449,4 +488,4 @@ with tab_historique:
         st.dataframe(df_l, use_container_width=True, hide_index=True)
     conn.close()
   else:
-    st.info("Aucune commande enregistrée pour l'instant.")
+    st.info("Aucune commande enregistrée.")
