@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS pour une interface sobre, professionnelle et moderne
+# Custom CSS pour une interface sobre et moderne (paramètre corrigé : unsafe_allow_html)
 st.markdown(
     """
     <style>
@@ -34,15 +34,15 @@ st.markdown(
         margin-bottom: 5px;
     }
     </style>
-""",
-    unsafe_allow_allow_html=True,
+    """,
+    unsafe_allow_html=True,
 )
 
 DB_FILE = "database.db"
 
 
 # ==========================================
-# 2. GESTION DE LA BASE DE DONNÉES SECURISÉE
+# 2. GESTION DE LA BASE DE DONNÉES SÉCURISÉE
 # ==========================================
 def get_connection():
   """Connexion sécurisée avec timeout pour éviter les verrous de BDD."""
@@ -56,7 +56,6 @@ def init_db():
   conn = get_connection()
   cursor = conn.cursor()
 
-  # Activer le mode WAL pour une meilleure gestion des accès concurents
   try:
     cursor.execute("PRAGMA journal_mode=WAL;")
   except Exception:
@@ -71,7 +70,7 @@ def init_db():
         quantite REAL NOT NULL DEFAULT 0,
         unite TEXT NOT NULL DEFAULT 'kg',
         seuil_alerte REAL NOT NULL DEFAULT 5,
-        prix_achat HT REAL NOT NULL DEFAULT 0,
+        prix_achat REAL NOT NULL DEFAULT 0,
         prix_unitaire REAL NOT NULL DEFAULT 0
     )
     """)
@@ -121,7 +120,7 @@ def init_db():
     )
     """)
 
-  # Migration dynamique si anciennes tables
+  # Migration dynamique pour ajouter les colonnes manquantes sans altérer les données
   def safe_add_column(table, column_def):
     col_name = column_def.split()[0]
     cursor.execute(f"PRAGMA table_info({table})")
@@ -343,7 +342,6 @@ with tab_pos:
       if st.session_state.panier:
         df_cart = pd.DataFrame(st.session_state.panier)
 
-        # Tableau lisible
         st.dataframe(
             df_cart[["nom", "quantite", "unite", "prix_unitaire", "total"]],
             use_container_width=True,
@@ -386,7 +384,6 @@ with tab_pos:
               cursor = conn.cursor()
               date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-              # Transaction atomique
               cursor.execute(
                   """
                                 INSERT INTO commandes (client_id, client_nom, date_commande, code_courrier, prix_total, statut)
@@ -418,7 +415,6 @@ with tab_pos:
                         float(item["total"]),
                     ),
                 )
-                # Décrémentation sécurisée du stock
                 cursor.execute(
                     """
                                     UPDATE stock 
@@ -497,7 +493,10 @@ with tab_cmd_hist:
               "Changer le statut :",
               ["En préparation", "Expédiée", "Livrée", "Annulée"],
               index=["En préparation", "Expédiée", "Livrée", "Annulée"].index(
-                  cmd["statut"] if cmd["statut"] in ["En préparation", "Expédiée", "Livrée", "Annulée"] else "En préparation"
+                  cmd["statut"]
+                  if cmd["statut"]
+                  in ["En préparation", "Expédiée", "Livrée", "Annulée"]
+                  else "En préparation"
               ),
               key=f"status_select_{cmd['id']}",
           )
@@ -512,7 +511,6 @@ with tab_cmd_hist:
             st.success("Statut mis à jour !")
             st.rerun()
 
-        # Affichage des lignes de la commande
         df_lines = pd.read_sql_query(
             "SELECT nom_produit as Produit, quantite as Quantité, prix_unitaire"
             " as 'Prix U. HT', total_ligne as 'Total HT' FROM lignes_commande"
