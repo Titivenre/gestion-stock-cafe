@@ -113,7 +113,6 @@ def init_db():
     )
     """)
 
-  # Vérification et migration dynamique des colonnes manquantes
   def safe_add_column(table, column_def):
     col_name = column_def.split()[0]
     cursor.execute(f"PRAGMA table_info({table})")
@@ -157,35 +156,43 @@ df_stock, df_clients, df_commandes = load_data()
 clients_a_relancer = []
 if not df_clients.empty and not df_commandes.empty:
   now = datetime.now()
-  for _, cli in df_clients.iterrows():
-    cmds = df_commandes[df_commandes["client_nom"] == cli["nom_entreprise"]]
-    if not cmds.empty:
-      last_date_str = cmds.iloc[0]["date_commande"]
-      try:
-        last_date = datetime.strptime(last_date_str, "%Y-%m-%d %H:%M")
-      except ValueError:
-        try:
-          last_date = datetime.strptime(last_date_str, "%Y-%m-%d")
-        except ValueError:
-          continue
+  # Détection dynamique du nom de la colonne client dans df_commandes
+  col_cli = (
+      "client_nom"
+      if "client_nom" in df_commandes.columns
+      else ("client" if "client" in df_commandes.columns else None)
+  )
 
-      freq = int(cli["frequence_jours"]) if cli["frequence_jours"] else 30
-      next_date = last_date + timedelta(days=freq)
-      if now > next_date:
-        retard = (now - next_date).days
-        clients_a_relancer.append({
-            "ID": cli["id"],
-            "Entreprise": cli["nom_entreprise"],
-            "Contact": cli["nom_contact"] or "N/A",
-            "Café habituel": (
-                cli["type_cafe"]
-                if pd.notna(cli["type_cafe"])
-                else "Non renseigné"
-            ),
-            "Téléphone": cli["telephone"] or "N/A",
-            "Dernière Commande": last_date_str,
-            "Retard (Jours)": retard,
-        })
+  if col_cli:
+    for _, cli in df_clients.iterrows():
+      cmds = df_commandes[df_commandes[col_cli] == cli["nom_entreprise"]]
+      if not cmds.empty:
+        last_date_str = cmds.iloc[0]["date_commande"]
+        try:
+          last_date = datetime.strptime(last_date_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+          try:
+            last_date = datetime.strptime(last_date_str, "%Y-%m-%d")
+          except ValueError:
+            continue
+
+        freq = int(cli["frequence_jours"]) if cli["frequence_jours"] else 30
+        next_date = last_date + timedelta(days=freq)
+        if now > next_date:
+          retard = (now - next_date).days
+          clients_a_relancer.append({
+              "ID": cli["id"],
+              "Entreprise": cli["nom_entreprise"],
+              "Contact": cli["nom_contact"] or "N/A",
+              "Café habituel": (
+                  cli["type_cafe"]
+                  if pd.notna(cli["type_cafe"])
+                  else "Non renseigné"
+              ),
+              "Téléphone": cli["telephone"] or "N/A",
+              "Dernière Commande": last_date_str,
+              "Retard (Jours)": retard,
+          })
 
 
 # ==========================================
@@ -387,20 +394,40 @@ with tab_pos:
               cursor = conn.cursor()
               date_now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-              cursor.execute(
-                  """
-                                INSERT INTO commandes (client_id, client_nom, date_commande, code_courrier, prix_total, statut)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                """,
-                  (
-                      int(client_row["id"]),
-                      str(selected_client_name),
-                      date_now,
-                      str(code_suivi).strip(),
-                      float(total_ht),
-                      "En préparation",
-                  ),
+              # Inspection de la structure réelle de la table 'commandes'
+              cursor.execute("PRAGMA table_info(commandes)")
+              existing_cols = [r[1] for r in cursor.fetchall()]
+
+              fields = []
+              values = []
+
+              if "client_id" in existing_cols:
+                fields.append("client_id")
+                values.append(int(client_row["id"]))
+
+              if "client_nom" in existing_cols:
+                fields.append("client_nom")
+                values.append(str(selected_client_name))
+
+              if "client" in existing_cols:
+                fields.append("client")
+                values.append(str(selected_client_name))
+
+              fields.extend(["date_commande", "code_courrier", "prix_total", "statut"])
+              values.extend([
+                  date_now,
+                  str(code_suivi).strip(),
+                  float(total_ht),
+                  "En préparation",
+              ])
+
+              placeholders = ", ".join(["?"] * len(fields))
+              fields_str = ", ".join(fields)
+
+              query = (
+                  f"INSERT INTO commandes ({fields_str}) VALUES ({placeholders})"
               )
+              cursor.execute(query, values)
 
               cmd_id = cursor.lastrowid
 
@@ -456,12 +483,21 @@ with tab_cmd_hist:
   st.subheader("Historique des Commandes & Suivi Logistique")
 
   if not df_commandes.empty:
+    col_client_name = (
+        "client_nom"
+        if "client_nom" in df_commandes.columns
+        else ("client" if "client" in df_commandes.columns else None)
+    )
+
+    client_options = (
+        ["Tous"] + df_commandes[col_client_name].dropna().unique().tolist()
+        if col_client_name
+        else ["Tous"]
+    )
+
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-      filter_client = st.selectbox(
-          "Filtrer par Client",
-          ["Tous"] + df_commandes["client_nom"].unique().tolist(),
-      )
+      filter_client = st.selectbox("Filtrer par Client", client_options)
     with col_f2:
       filter_statut = st.selectbox(
           "Filtrer par Statut",
@@ -469,8 +505,8 @@ with tab_cmd_hist:
       )
 
     df_filtered = df_commandes.copy()
-    if filter_client != "Tous":
-      df_filtered = df_filtered[df_filtered["client_nom"] == filter_client]
+    if col_client_name and filter_client != "Tous":
+      df_filtered = df_filtered[df_filtered[col_client_name] == filter_client]
     if filter_statut != "Tous":
       df_filtered = df_filtered[df_filtered["statut"] == filter_statut]
 
@@ -482,8 +518,9 @@ with tab_cmd_hist:
           else ("🔵" if cmd["statut"] == "Expédiée" else "🟢")
       )
 
+      c_name = cmd[col_client_name] if col_client_name else "Client"
       header_text = (
-          f"{status_color} Commande N°{cmd['id']} — {cmd['client_nom']} —"
+          f"{status_color} Commande N°{cmd['id']} — {c_name} —"
           f" {cmd['prix_total']:,.2f} € HT ({cmd['date_commande']})"
       )
 
@@ -491,7 +528,7 @@ with tab_cmd_hist:
         c_info1, c_info2 = st.columns(2)
 
         with c_info1:
-          st.write(f"**Client :** {cmd['client_nom']}")
+          st.write(f"**Client :** {c_name}")
           st.write(f"**Date :** {cmd['date_commande']}")
           st.write(f"**Code Suivi/Courrier :** {cmd['code_courrier'] or 'N/A'}")
 
