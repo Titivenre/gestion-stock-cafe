@@ -399,6 +399,7 @@ with tab_pos:
               fields = []
               values = []
 
+              # Gestion dynamique de toutes les anciennes colonnes possibles dans 'commandes'
               if "client_id" in existing_cols:
                 fields.append("client_id")
                 values.append(int(client_row["id"]))
@@ -411,18 +412,28 @@ with tab_pos:
                 fields.append("client")
                 values.append(str(selected_client_name))
 
-              first_pid = (
+              first_item_nom = (
+                  st.session_state.panier[0]["nom"]
+                  if st.session_state.panier
+                  else "Produit"
+              )
+              first_item_pid = (
                   st.session_state.panier[0]["produit_id"]
                   if st.session_state.panier
                   else 1
               )
-              if "produit_id" in existing_cols:
-                fields.append("produit_id")
-                values.append(first_pid)
+
+              if "nom_produit" in existing_cols:
+                fields.append("nom_produit")
+                values.append(first_item_nom)
 
               if "produit" in existing_cols:
                 fields.append("produit")
-                values.append(st.session_state.panier[0]["nom"])
+                values.append(first_item_nom)
+
+              if "produit_id" in existing_cols:
+                fields.append("produit_id")
+                values.append(first_item_pid)
 
               if "quantite" in existing_cols:
                 fields.append("quantite")
