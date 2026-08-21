@@ -14,7 +14,7 @@ def get_connection():
   return sqlite3.connect("database.db")
 
 
-# Initialisation des tables BDD
+# Initialisation des tables BDD avec mise à jour automatique
 def init_db():
   conn = get_connection()
   cursor = conn.cursor()
@@ -45,11 +45,11 @@ def init_db():
     )
     """)
 
-  # Migration légère si la colonne type_cafe n'existait pas
-  try:
+  # Vérification et ajout dynamique de la colonne type_cafe si manquante
+  cursor.execute("PRAGMA table_info(clients)")
+  columns = [column[1] for column in cursor.fetchall()]
+  if "type_cafe" not in columns:
     cursor.execute("ALTER TABLE clients ADD COLUMN type_cafe TEXT")
-  except sqlite3.OperationalError:
-    pass  # La colonne existe déjà
 
   cursor.execute("""
     CREATE TABLE IF NOT EXISTS commandes (
@@ -246,7 +246,10 @@ with tab_stock:
       st.success("Modifications du stock enregistrées !")
       st.rerun()
   else:
-    st.info("Le stock est vide. Utilisez le formulaire ci-dessus pour ajouter des articles.")
+    st.info(
+        "Le stock est vide. Utilisez le formulaire ci-dessus pour ajouter des"
+        " articles."
+    )
 
 # --- ONGLET 2 : COMMANDE ---
 with tab_commande:
@@ -255,7 +258,9 @@ with tab_commande:
   if df_clients.empty:
     st.warning("⚠️ Enregistrez d'abord un client dans le 'Répertoire Clients'.")
   elif df_stock.empty:
-    st.warning("⚠️ Aucun produit en stock. Ajoutez-en dans l'onglet 'Gestion Stock'.")
+    st.warning(
+        "⚠️ Aucun produit en stock. Ajoutez-en dans l'onglet 'Gestion Stock'."
+    )
   else:
     if "panier" not in st.session_state:
       st.session_state.panier = []
@@ -278,7 +283,8 @@ with tab_commande:
 
       st.write("### 2. Ajouter des produits")
       prod_options = {
-          f"[{row['categorie']}] {row['nom']} (Stock: {row['quantite']} {row['unite']})": row
+          f"[{row['categorie']}] {row['nom']} (Stock: {row['quantite']}"
+          f" {row['unite']})": row
           for _, row in df_stock.iterrows()
       }
       choix_prod_nom = st.selectbox("Produit", list(prod_options.keys()))
@@ -304,12 +310,12 @@ with tab_commande:
 
       if st.button("➕ Ajouter la ligne au panier"):
         st.session_state.panier.append({
-            "produit_id": prod_choisi["id"],
-            "nom": prod_choisi["nom"],
-            "quantite": qte_souhaitee,
-            "unite": prod_choisi["unite"],
-            "prix_unitaire": prix_final,
-            "total": qte_souhaitee * prix_final,
+            "produit_id": int(prod_choisi["id"]),
+            "nom": str(prod_choisi["nom"]),
+            "quantite": float(qte_souhaitee),
+            "unite": str(prod_choisi["unite"]),
+            "prix_unitaire": float(prix_final),
+            "total": float(qte_souhaitee * prix_final),
         })
         st.success("Ajouté !")
 
@@ -323,7 +329,7 @@ with tab_commande:
             hide_index=True,
         )
 
-        total_cmd = df_p["total"].sum()
+        total_cmd = float(df_p["total"].sum())
         st.write(f"### Total HT : **{total_cmd:,.2f} €**")
 
         code_courrier_input = st.text_input("Code Suivi / Courrier (Optionnel)")
@@ -340,9 +346,9 @@ with tab_commande:
                     """,
               (
                   int(client_info["id"]),
-                  client_choisi_nom,
+                  str(client_choisi_nom),
                   date_str,
-                  code_courrier_input,
+                  str(code_courrier_input),
                   total_cmd,
                   "En préparation",
               ),
@@ -356,16 +362,16 @@ with tab_commande:
                         VALUES (?, ?, ?, ?, ?)
                         """,
                 (
-                    cmd_id,
-                    item["produit_id"],
-                    item["nom"],
-                    item["quantite"],
-                    item["prix_unitaire"],
+                    int(cmd_id),
+                    int(item["produit_id"]),
+                    str(item["nom"]),
+                    float(item["quantite"]),
+                    float(item["prix_unitaire"]),
                 ),
             )
             cursor.execute(
                 "UPDATE stock SET quantite = quantite - ? WHERE id = ?",
-                (item["quantite"], item["produit_id"]),
+                (float(item["quantite"]), int(item["produit_id"])),
             )
 
           conn.commit()
